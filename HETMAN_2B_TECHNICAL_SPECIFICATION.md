@@ -300,7 +300,7 @@ Hetman-2.0B guarantees full 256,000-token execution on consumer graphics cards s
 
 ### 9.2. Open-Source Charter & Reproducibility
 * **License:** **Apache License 2.0** (100% Free, Permissive, Commercial & Non-Commercial use permitted without royalty).
-* **Public Artifacts:** All pre-trained model weights, tokenizer tables, JAX Pallas training kernels, evaluation scripts, and synthetic data recipes will be published without restriction on Hugging Face (`hetman-ai/hetman-2.0b`).
+* **Public Artifacts:** All pre-trained model weights, tokenizer tables, JAX Pallas training kernels, evaluation scripts, and synthetic data recipes will be published without restriction on Hugging Face ([YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)).
 * **Local Privacy Guarantee:** The model operates strictly local and offline. Zero telemetry, zero external API queries, zero cloud lock-in.
 
 ### 9.3. Co-Designed Native Runtime: `Rada.cpp`

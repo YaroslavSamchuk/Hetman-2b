@@ -2,6 +2,7 @@
 ### 2.14B Total Capacity (~1.603B Active) | BitNet b1.58 Ternary | 256k Context | Google TPU v5e-128 Pod
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-YSamchuk%2FHetman--2b-yellow)](https://huggingface.co/YSamchuk/Hetman-2b)
 [![Target-Hardware](https://img.shields.io/badge/Target_Edge-NVIDIA_RTX_2060+_>=6GB-green.svg)](#)
 [![Pretrain-Platform](https://img.shields.io/badge/Pretraining-Google_TPU_v5e--128-orange.svg)](#)
 [![Context-Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
