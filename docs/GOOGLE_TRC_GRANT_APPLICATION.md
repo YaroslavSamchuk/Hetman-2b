@@ -1,5 +1,5 @@
 # Official Compute Grant Application: Google Cloud TPU Research Cloud (TRC)
-## Project: Hetman-2.0B Sovereign Open-Source Foundation Model
+## Project: Hetman-2.0B High-Efficiency Open-Source Foundation Model
 ### Order Reference: `TRC-2026-UA-HETMAN-2B-DISPATCH`
 
 ---

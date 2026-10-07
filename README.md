@@ -1,4 +1,4 @@
-# Hetman-2.0B: Sovereign Open-Source Foundation Model
+# Hetman-2.0B: High-Efficiency Open-Source Foundation Model
 ### 2.14B Total Capacity (~1.603B Active) | BitNet b1.58 Ternary | 256k Context | Google TPU v5e-128 Pod
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -7,7 +7,7 @@
 [![Context-Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
 
 ## 📌 Executive Summary
-**Hetman-2.0B** («Гетьман 2б») is a sovereign, open-source foundation model engineered from first principles for high-throughput pre-training on **Google Cloud TPU v5e-128 Pod Slices** (via the Google TPU Research Cloud grant program) and cost-effective local inference on accessible consumer graphics cards with **>= 6 GB VRAM** (NVIDIA GeForce RTX 2060 6GB+, RTX 3050/3060, and RTX 4050/4060 Mobile/Desktop).
+**Hetman-2.0B** («Гетьман 2б») is an open-source, edge-native foundation model engineered from first principles for high-throughput pre-training on **Google Cloud TPU v5e-128 Pod Slices** (via the Google TPU Research Cloud grant program) and cost-effective local inference on accessible consumer graphics cards with **>= 6 GB VRAM** (NVIDIA GeForce RTX 2060 6GB+, RTX 3050/3060, and RTX 4050/4060 Mobile/Desktop).
 
 * **Nominal Capacity:** 2,137,522,176 parameters (~2.138B storage footprint).
 * **Active Compute per Token:** ~1,602,748,416 parameters (~1.603B active compute) via Top-32 sparse associative memory retrieval.
@@ -63,33 +63,6 @@ cd Hetman-2b
 
 # Run verification suite (verifies BitLinear, FWHT, DeltaNet, QK-Norm, and Hopfield Core)
 python src/test_verification.py
-```
-
-Expected output:
-```
-======================================================================
-  HETMAN-2.0B ARCHITECTURE VERIFICATION TEST (LOCAL SANITY)
-======================================================================
-[1/5] Configuration:
-      Vocab: 65536 | Hidden: 1536 | FFN: 6144
-      Layers: 34 (28 DeltaNet + 6 Global Attention)
-      Hopfield Core: 32 groups x 512 x 512 = 8.39M slots
-      QK-Norm Logit Bound: |S_ij| <= 11.3137
-
-[2/5] Testing BitLinear & Fast Walsh-Hadamard Transform (FWHT B=512)...
-      ✓ BitLinear 1.58-bit quantization & Hadamard rotation passed!
-[3/5] Testing Gated DeltaNet linear recurrent attention (O(1) memory)...
-      ✓ State matrix size per layer: 128.0 KB (3.50 MB across 28 layers)
-      ✓ Gated DeltaNet preserved and updated recurrent memory without leaks!
-[4/5] Testing Global Softmax FlashAttention with Bounded QK-Norm...
-      ✓ QK-Norm logits strictly bounded in [-11.31, +11.31]. Zero loss spikes!
-[5/5] Testing Associative Memory Hopfield Core (Top-32 selection)...
-      ✓ Bilinear retrieval, Top-32 softmax & Laplace-smoothed entropy verified!
-
-======================================================================
-  ALL 5 NUMERICAL SANITY TESTS PASSED! (0 NaNs, 0 Errors)
-  Hetman-2.0B architecture verified and ready for TPU v5e-128 pre-training!
-======================================================================
 ```
 
 ---

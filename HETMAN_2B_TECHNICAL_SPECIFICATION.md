@@ -1,5 +1,5 @@
 # Hetman-2.0B: Systems Architecture & Pre-Training Specification
-### An Open-Source Sovereign Ternary Foundation Model Designed for Consumer GPUs (NVIDIA RTX 20-Series & Newer, >= 6 GB VRAM)
+### An Open-Source High-Efficiency Ternary Foundation Model Designed for Consumer GPUs (NVIDIA RTX 20-Series & Newer, >= 6 GB VRAM)
 #### Unifying Factorized Hopfield Memory, Gated DeltaNet Attention, and an In-Process Verified Logic Arbiter
 
 **Document Identifier:** RFC-HETMAN-2.0B-PRODUCTION-OFFICIAL  
@@ -7,7 +7,7 @@
 **Licensing & Distribution:** Apache License 2.0 (100% Free, Unencumbered Open Source)  
 **Target Pre-Training Infrastructure:** Google Cloud TPU v5e-128 Pod Slice (via TPU Research Cloud Allocation)  
 **Primary Edge Deployment Target:** Consumer GPUs starting from **NVIDIA GeForce RTX 20-series (RTX 2060 6 GB+)**, RTX 30-series (RTX 3050 6GB, RTX 3060), RTX 40-series (RTX 4050 Mobile 6 GB, RTX 4060 Mobile 8 GB, Desktop), RTX 50-series, Apple Silicon Unified Memory, and AVX2/AVX-512 CPUs  
-**Dedicated Inference Runtime:** `Rada.cpp` (Autonomous C++20 / CUDA Sovereign Inference Engine)  
+**Dedicated Inference Runtime:** `Rada.cpp` (Autonomous C++20 / CUDA High-Performance Inference Engine)  
 **Nominal Parameter Capacity:** 2,137,522,176 Total Parameters (~2.138B Storage Capacity; ~1.603B Active Compute per Token via Top-32 Sparse Hopfield Memory)  
 
 ---
@@ -35,10 +35,10 @@ Hetman-2.0B resolves these trade-offs by enforcing a strict functional decomposi
 4. **Exit Stem & Multi-Highway Decoding (4 Layers):** Normalized residual recombination ($1/\sqrt{3}$ RMSNorm) and output synthesis, projecting to a Cyrillic-optimized 65,536-token vocabulary.
 5. **Orthogonal Outlier Elimination via Blockwise Walsh-Hadamard Transforms (FWHT, $B_{\text{had}} = 512$):** Elimination of activation outliers via online orthogonal rotations ($B_{\text{had}} = 512$), bounding ternary 1.58-bit quantization loss to $< 1.8\%$ compared to FP32 baselines.
 
-### 1.3. Open-Source Sovereign Democratization: Consumer GPUs from 6 GB+ VRAM
+### 1.3. Edge-Native AI Democratization: Consumer GPUs from 6 GB+ VRAM
 Frontier foundation models with long context (256k) have historically been restricted to massive corporate server clusters and closed proprietary cloud APIs. Hetman-2.0B fundamentally dismantles this barrier to empower open science:
 1. **Universal Consumer Hardware Accessibility:** Engineered from first principles to execute at full 256,000-token context locally on affordable consumer graphics cards starting from **NVIDIA GeForce RTX 20-series (RTX 2060 6 GB)**, through RTX 30-series (RTX 3050 6 GB, RTX 3060), and modern RTX 40-series mobile and desktop GPUs with **>= 6 GB VRAM**.
-2. **Sovereign Offline Execution:** Completely autonomous and air-gapped, requiring zero internet connectivity, zero subscription fees, and emitting zero telemetry.
+2. **Privacy-Preserving Offline Execution:** Completely autonomous and air-gapped, requiring zero internet connectivity, zero subscription fees, and emitting zero telemetry.
 3. **Hardware-Co-Designed Ecosystem:** Released alongside **`Rada.cpp`**, a custom zero-dependency C++20 / CUDA runtime optimized specifically for ternary BitNet GEMM, online Walsh-Hadamard rotations, and associative Hopfield memory retrieval.
 
 ---
@@ -298,13 +298,13 @@ Hetman-2.0B guarantees full 256,000-token execution on consumer graphics cards s
 * **Ukrainian Language Understanding:** UA-MMLU (Ukrainian translated & native benchmark), UA-CivilLaws (legislative reasoning QA).
 * **Long-Context Retrieval:** Needle-In-A-Haystack (retrieval fidelity up to 262,144 tokens).
 
-### 9.2. Sovereign Open-Source Charter & Reproducibility
+### 9.2. Open-Source Charter & Reproducibility
 * **License:** **Apache License 2.0** (100% Free, Permissive, Commercial & Non-Commercial use permitted without royalty).
 * **Public Artifacts:** All pre-trained model weights, tokenizer tables, JAX Pallas training kernels, evaluation scripts, and synthetic data recipes will be published without restriction on Hugging Face (`hetman-ai/hetman-2.0b`).
-* **Sovereign Privacy Guarantee:** The model operates strictly local and offline. Zero telemetry, zero external API queries, zero cloud lock-in.
+* **Local Privacy Guarantee:** The model operates strictly local and offline. Zero telemetry, zero external API queries, zero cloud lock-in.
 
 ### 9.3. Co-Designed Native Runtime: `Rada.cpp`
 To deliver peak throughput on consumer hardware without the bloat and mismatched primitives of standard Transformer runtimes, Hetman-2.0B is deployed via **`Rada.cpp`**:
-* **Etymology & Philosophy:** Named after the historical Ukrainian **Козацька Рада** (Cossack Council) and the concept of *«радитися»* (deliberating, consulting, seeking wise counsel) — symbolizing collective wisdom, autonomy, and sovereign decision-making.
+* **Etymology & Philosophy:** Named after the historical Ukrainian **Козацька Рада** (Cossack Council) and the concept of *«радитися»* (deliberating, consulting, seeking wise counsel) — symbolizing collective wisdom, autonomy, and deliberative decision-making.
 * **Technical Purpose:** A lightweight, pure C++20 / CUDA / Vulkan inference runtime built specifically for ternary BitNet operations, Walsh-Hadamard rotations, Gated DeltaNet state tracking, and factorized Hopfield associative retrieval.
 * **Full Specification:** Detailed in the companion architectural blueprint: `RADA_CPP_TECHNICAL_SPECIFICATION.md`.
