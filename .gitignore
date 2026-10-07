@@ -1,0 +1,34 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Large model artifacts & weights (stored on Hugging Face / GCS)
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.rada
+checkpoints/
+orbax_checkpoints/
+
+# Logs & telemetry
+*.log
+wandb/
+runs/
+.ipynb_checkpoints/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

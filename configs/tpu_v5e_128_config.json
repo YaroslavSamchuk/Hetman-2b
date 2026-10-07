@@ -1,0 +1,40 @@
+{
+  "model_name": "Hetman-2.0B",
+  "architecture": {
+    "vocab_size": 65536,
+    "hidden_size": 1536,
+    "intermediate_size": 6144,
+    "total_layers": 34,
+    "deltanet_layers": 28,
+    "global_layers": 6,
+    "hopfield_attractors": 8388608,
+    "active_params_per_token": 1602748416,
+    "total_storage_params": 2137522176
+  },
+  "training_schedule": {
+    "total_tokens": 850000000000,
+    "phase_1_tokens_4k": 820000000000,
+    "phase_2_tokens_256k": 30000000000,
+    "global_batch_size_tokens": 4194304,
+    "total_steps": 202652,
+    "learning_rate_schedule": "WSD",
+    "peak_learning_rate": 0.0018,
+    "min_learning_rate": 0.00018,
+    "warmup_steps": 2000,
+    "stable_steps": 180652,
+    "decay_steps": 20000,
+    "gradient_clip_norm": 1.0,
+    "weight_decay": 0.1,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-8
+  },
+  "target_hardware": {
+    "cluster": "Google Cloud TPU v5e-128 Pod Slice",
+    "chips": 128,
+    "hbm_total_gb": 2048,
+    "estimated_training_days": 16.17,
+    "grant_window_days": 28.0,
+    "safety_contingency_buffer_days": 11.83
+  }
+}
