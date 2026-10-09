@@ -9,9 +9,9 @@
 * **Project Name:** Hetman-2.0B (`hetman-ai/hetman-core`)
 * **Requested Compute Resource:** Google Cloud **TPU v5e-128 Pod Slice** (128 accelerator chips, 2,048 GB HBM)
 * **Grant Window Duration:** **28 Calendar Days** (Zone: `us-east1-d` / Spot or Reserved Capacity)
-* **Pre-Training Token Budget:** **850 Billion Tokens** (Phase 1: 820B at 4k context; Phase 2: 30B annealing at 256k context)
-* **Pure Compute Training Time:** **16.17 Days** (14.22 days Phase 1 @ 26.5% MFU + 1.95 days Phase 2 @ 18.5% MFU)
-* **Safety Contingency Buffer:** **11.83 Days (42.25%)** for Orbax asynchronous checkpointing, AOT compilation, and Borg preemption recovery.
+* **Pre-Training & Alignment Token Budget:** **855 Billion Tokens** (Phase 1: 820B at 4k context; Phase 2: 30B annealing at 256k context; Phase 3: 5B uncensored chat & reasoning SFT)
+* **Pure Compute Training Time:** **16.52 Days** (14.22 days Phase 1 + 1.95 days Phase 2 + 0.35 days Phase 3 SFT)
+* **Safety Contingency Buffer:** **11.48 Days (41.0%) / 275.5 Hours** for Orbax asynchronous checkpointing, AOT compilation, and Borg preemption recovery.
 * **Licensing & Open Source Commitment:** **100% Free & Permissive Open Source under Apache License 2.0**. All pre-trained weights, tokenizer tables, JAX Pallas kernels, evaluation scripts, and C++ inference runtimes will be published publicly on Hugging Face and GitHub.
 
 ---
@@ -27,13 +27,14 @@ Hetman-2.0B breaks the monolithic memory bottleneck in sub-3B models by introduc
 ---
 
 ### 3. Compute Budget & FLOPs Verification
-* **Phase 1 FLOPs (4k Context):**
-  $$\text{FLOPs}_1 = 6 \times 1.6027 \times 10^9 \times 8.2 \times 10^{11} \times 1.39 = \mathbf{1.096 \times 10^{22} \text{ FLOPs}}$$
-  $$\text{Time}_1 = \frac{1.096 \times 10^{22}}{128 \times 1.97 \times 10^{14} \times 0.265 \times 86400} = \mathbf{14.22 \text{ Days}}$$
-* **Phase 2 FLOPs (256k Context Long-Context Anneal):**
+* **Phase 1 FLOPs (820B Tokens @ 4k Context):**
+  $$\text{FLOPs}_1 = 6 \times 1.6027 \times 10^9 \times 8.2 \times 10^{11} \times 1.39 = \mathbf{1.096 \times 10^{22} \text{ FLOPs}} \implies \mathbf{14.22 \text{ Days}}$$
+* **Phase 2 FLOPs (30B Tokens @ 256k Context Long-Context Anneal):**
   $$\text{FLOPs}_2 = \mathbf{5.73 \times 10^{20} \text{ FLOPs}} \implies \mathbf{1.95 \text{ Days}}$$
-* **Total Training Execution:** $\mathbf{16.17 \text{ Days}} \ll \mathbf{28.00 \text{ Days}}$.
-* **Guaranteed Feasibility:** The schedule leaves **283.9 hours of safety margin**.
+* **Phase 3 FLOPs (5B Tokens Chat & Reasoning SFT):**
+  $$\text{FLOPs}_3 = \mathbf{6.68 \times 10^{19} \text{ FLOPs}} \implies \mathbf{0.35 \text{ Days (8.4 Hours)}}$$
+* **Total Training Execution:** $\mathbf{16.52 \text{ Days}} \ll \mathbf{28.00 \text{ Days}}$.
+* **Guaranteed Feasibility:** The schedule leaves **275.5 hours of safety margin**.
 
 ---
 

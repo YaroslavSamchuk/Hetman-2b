@@ -209,6 +209,29 @@ To eliminate the latency and instability of external Docker sandboxes, Hetman-2.
 | **Gradient Clipping** | **1.0 (Global L2-norm)** | Critical to prevent gradient spikes during STE sign flips |
 | **Weight Decay ($\lambda$)** | **0.02** for BitLinear weights; **0.0** for LayerNorms, biases, codebooks | Prevents weight collapse toward zero |
 
+### 5.5. Phase 3: High-Fidelity Uncensored Chat & Reasoning Alignment (ChatML Protocol)
+To ensure Hetman-2.0B transitions seamlessly from raw pre-trained document continuation into an intelligent, highly articulate deliberative assistant ready for immediate interactive deployment in `Rada.cpp` without post-hoc conversion scripts, the training curriculum concludes with a dedicated Supervised Fine-Tuning (SFT) phase:
+1. **ChatML Canonical Delimiter Protocol:**
+   Hetman-2.0B adopts the industry-standard ChatML structural framing with strict token encapsulation:
+   ```text
+   <|im_start|>system
+   {system_prompt}<|im_end|>
+   <|im_start|>user
+   {user_query}<|im_end|>
+   <|im_start|>assistant
+   <think>
+   {chain_of_thought_reasoning}
+   </think>
+   {direct_objective_response}<|im_end|>
+   ```
+2. **Zero-Censorship & Anti-Moralizing Objective Policy:**
+   * **The Flaw of Preachy Refusals:** Conventional safety fine-tuning introduces pervasive refusal vectors («As an AI language model, I cannot...», moral lecturing, paternalistic disclaimers) that degrade latent reasoning representations, induce false-positive refusals on legitimate academic/engineering queries (e.g. historical military doctrine, vulnerability analysis, biochemistry, criminal statutory code), and consume redundant context tokens.
+   * **Zero Refusal & Maximum Compliance:** Hetman-2.0B's SFT alignment explicitly purges moralizing boilerplate, sanctimonious refusals, and condescending disclaimers. The model responds directly, objectively, rigorously, and without hesitation to technical, historical, legal, mathematical, coding, and philosophical inquiries.
+   * **Objective Truth & Intellectual Liberty:** Grounded in Ukrainian historical deliberative philosophy (Козацька Рада), the model provides unvarnished, scholarly, and analytically complete answers, treating the user as an autonomous, adult deliberator.
+3. **Targeted Loss Masking:**
+   During Phase 3 SFT, cross-entropy loss is computed **strictly across assistant response tokens** (including `<think>...</think>` tokens). All system instructions, delimiters, and user turns are masked with label `-100`, preventing the model from memorizing user prompt styles or drifting away from robust prompt adherence.
+
+
 ---
 
 ## 6. DATASET COMPOSITION & TOKENIZER OPTIMIZATION
@@ -224,8 +247,20 @@ To eliminate the latency and instability of external Docker sandboxes, Hetman-2.
 | **TOTAL** | **850.0B**| **100.0%** | Balanced Multimodal-Code-Reasoning-UA Mix | Packed into fixed 4096-token buffers |
 
 ### 6.2. Cyrillic BPE Tokenizer ($V = 65,536$)
-* **Vocabulary Split:** 16,000 Ukrainian/Cyrillic tokens; 25,000 Code tokens; 24,536 English/General tokens.
+* **Vocabulary Split:** 16,000 Ukrainian/Cyrillic tokens; 25,000 Code tokens; 24,512 English/General tokens; 24 Reserved Control/Special tokens.
+* **Special Framing Tokens:** Explicitly includes `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`, `<thought_summary>`, and `</thought_summary>` for native ChatML parsing and internal CoT reasoning.
 * **Cyrillic Fertility Target:** **$\le 1.18$ tokens per word** on standard Ukrainian text (vs. 1.38 in Llama-3 and 2.1 in standard BPE models), increasing effective generation throughput by 20%.
+
+### 6.3. Conversational & Reasoning SFT Dataset Composition (5.0B Tokens)
+Phase 3 SFT processes **5.0 Billion tokens** (~1.25M multi-turn interactions packed into 4096-token sequences), calibrated to instill conversational versatility, deep multi-step deduction, and authoritative domain counsel:
+
+| SFT Corpus Component | Volume (Tokens) | Proportion | Primary Sources & Curation Standard | Key Competency Target |
+|---|---|---|---|---|
+| **Deep Reasoning & Synthetic CoT** | **1.50B** | **30.0%** | UltraInteract, NuminaMath-CoT, synthetic step-by-step algorithmic deduction | `<think>` variable tracing, formal mathematical proofs, logic puzzle deconstruction |
+| **High-IQ Uncensored Dialogue** | **1.50B** | **30.0%** | De-censored UltraChat, WildChat/LMSYS clean high-IQ subset, OpenHermes 2.5 | Direct instruction adherence, elimination of preachy refusals, nuanced discussion |
+| **Ukrainian Domain & Deliberative Counsel** | **1.00B** | **20.0%** | Ukrainian statutory jurisprudence, history, philosophy, administrative consulting | Expert Ukrainian deliberation, constitutional/civil law citations, cultural depth |
+| **Code Synthesis & Systems Engineering** | **1.00B** | **20.0%** | Evol-Instruct-Code, C++20/CUDA/Rust systems tasks, JSON/bash tool schema | Syntactically flawless code generation, zero-hallucination API calls, CLI tooling |
+| **TOTAL (Phase 3 SFT)** | **5.00B** | **100.0%** | **100% De-Censored, High-Compliance Multi-Turn Corpus** | **Out-of-the-box conversational readiness in `Rada.cpp`** |
 
 ---
 
@@ -233,22 +268,24 @@ To eliminate the latency and instability of external Docker sandboxes, Hetman-2.
 
 ### 7.1. Compute Allocation Math (Google TRC Allocation)
 * **Total Parameters:** $N = 2.138\text{B}$; Active Compute: $N_{\text{active}} \approx 1.603\text{B}$.
-* **Phase 1 Compute (800B Tokens @ 4096 Context):**
-  * FLOPs: $6 \times 1.603\text{B} \times 800 \times 10^9 + \text{Overhead} \approx \mathbf{8.21 \times 10^{21} \text{ FLOPs}}$.
-* **Phase 2 Context Annealing (50B Tokens @ 256k Context):**
-  * FLOPs: $\mathbf{7.85 \times 10^{20} \text{ FLOPs}}$.
-* **Total Pre-Training Compute:** $\mathbf{8.995 \times 10^{21} \text{ FLOPs}}$.
+* **Phase 1 Compute (820B Tokens @ 4096 Context):**
+  * FLOPs: $6 \times 1.603\text{B} \times 820 \times 10^9 \times 1.39 \approx \mathbf{1.096 \times 10^{22} \text{ FLOPs}}$.
+* **Phase 2 Context Annealing (30B Tokens @ 256k Context):**
+  * FLOPs: $\mathbf{5.73 \times 10^{20} \text{ FLOPs}}$.
+* **Phase 3 Uncensored Chat & Reasoning SFT (5.0B Tokens @ 4096 Context):**
+  * FLOPs: $6 \times 1.603\text{B} \times 5.0 \times 10^9 \times 1.39 \approx \mathbf{6.68 \times 10^{19} \text{ FLOPs}}$.
+* **Total Compute Across All 3 Phases (855B Tokens):** $\mathbf{1.160 \times 10^{22} \text{ FLOPs}}$.
 
 ### 7.2. 28-Day Hardware Schedule (TPU v5e-128 Pod Slice)
 * **Hardware Configuration:** 128 TPU v5e chips ($128 \times 197 \text{ TFLOPS} = \mathbf{25.216 \text{ PFLOPS Peak}}$).
-* **Realistic Sustained MFU:** **$26.5\%$** for Phase 1 ($6.682 \times 10^{15} \text{ FLOP/s}$); **$18.5\%$** for Phase 2 Context Annealing.
-* **Daily Throughput:** $6.682 \times 10^{15} \times 86,400 = \mathbf{5.773 \times 10^{20} \text{ FLOP/day}}$.
+* **Realistic Sustained MFU:** **$26.5\%$** for Phase 1 & Phase 3 ($6.682 \times 10^{15} \text{ FLOP/s}$); **$18.5\%$** for Phase 2 Context Annealing ($4.665 \times 10^{15} \text{ FLOP/s}$).
 * **Execution Duration:**
-  * Phase 1 (800B Tokens @ 4k Context): $T_1 = \frac{8.21 \times 10^{21}}{5.773 \times 10^{20}} \approx \mathbf{14.22 \text{ Days}}$.
-  * Phase 2 (50B Tokens @ 256k Context): $T_2 = \frac{7.85 \times 10^{20}}{4.034 \times 10^{20}} \approx \mathbf{1.95 \text{ Days}}$.
-  * Total Training Time: $14.22 + 1.95 = \mathbf{16.17 \text{ Days}}$.
+  * **Phase 1 (820B Tokens @ 4k Context):** $T_1 = \frac{1.096 \times 10^{22}}{6.682 \times 10^{15} \times 86,400} \approx \mathbf{14.22 \text{ Days}}$.
+  * **Phase 2 (30B Tokens @ 256k Context):** $T_2 = \frac{5.73 \times 10^{20}}{4.665 \times 10^{15} \times 86,400} \approx \mathbf{1.95 \text{ Days}}$.
+  * **Phase 3 (5B Tokens Chat SFT @ 4k Context):** $T_3 = \frac{6.68 \times 10^{19}}{6.682 \times 10^{15} \times 86,400} \approx \mathbf{0.35 \text{ Days (8.4 Hours)}}$.
+  * **Total Combined Training Time:** $14.22 + 1.95 + 0.35 = \mathbf{16.52 \text{ Days}}$.
 * **Verified Contingency Buffer:**
-  $$\text{Buffer} = 28.00 - 16.17 = \mathbf{11.83 \text{ Days (283.9 Hours)}}$$
+  $$\text{Buffer} = 28.00 - 16.52 = \mathbf{11.48 \text{ Days (275.5 Hours)}}$$
   Provides a massive safety margin for Orbax asynchronous checkpointing to GCS, AOT compilation, and Borg spot preemption recovery.
 
 ---

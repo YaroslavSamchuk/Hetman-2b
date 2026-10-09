@@ -15,6 +15,7 @@
 * **Weight Precision:** BitNet b1.58 ternary $\{-1, 0, +1\}$ augmented with orthogonal Fast Walsh-Hadamard Transforms ($B_{\text{had}} = 512$, quantization loss bounded to $< 1.8\%$ vs. FP32).
 * **Context Window:** 262,144 tokens (256k) with zero memory explosion, enabled by 28 Gated DeltaNet recurrent memory layers ($O(1)$ state) and 6 interleaved Global Softmax FlashAttention layers.
 * **Vocabulary:** 65,536 tokens (Cyrillic-optimized SentencePiece BPE, achieving $\le 1.18$ tokens/word on Ukrainian and Cyrillic corpora).
+* **Conversational Alignment:** Native ChatML framing with `<think>...</think>` internal reasoning tags, aligned via Phase 3 (5.0B tokens uncensored SFT) for zero-refusal, high-compliance objective counsel ready for immediate out-of-the-box serving in `Rada.cpp`.
 
 ---
 

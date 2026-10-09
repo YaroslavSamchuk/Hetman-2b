@@ -12,29 +12,46 @@
     "total_storage_params": 2137522176
   },
   "training_schedule": {
-    "total_tokens": 850000000000,
+    "total_tokens": 855000000000,
     "phase_1_tokens_4k": 820000000000,
     "phase_2_tokens_256k": 30000000000,
+    "phase_3_tokens_chat_sft": 5000000000,
     "global_batch_size_tokens": 4194304,
-    "total_steps": 202652,
-    "learning_rate_schedule": "WSD",
+    "total_steps": 203845,
+    "learning_rate_schedule": "WSD_with_SFT_Anneal",
     "peak_learning_rate": 0.0018,
     "min_learning_rate": 0.00018,
+    "sft_learning_rate": 0.00012,
     "warmup_steps": 2000,
     "stable_steps": 180652,
     "decay_steps": 20000,
+    "sft_steps": 1192,
     "gradient_clip_norm": 1.0,
     "weight_decay": 0.1,
     "adam_beta1": 0.9,
     "adam_beta2": 0.95,
     "adam_eps": 1e-8
   },
+  "chat_alignment": {
+    "format": "ChatML",
+    "template": "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n{reasoning}\n</think>\n{response}<|im_end|>",
+    "policy": "Uncensored / Objective / Zero Moral Refusals",
+    "sft_dataset_mix": {
+      "reasoning_cot": "1.5B tokens (Synthetic CoT, Math & Algorithmic proofs)",
+      "uncensored_dialogue": "1.5B tokens (Filtered UltraChat & De-censored conversations)",
+      "ukrainian_counsel": "1.0B tokens (High-IQ Ukrainian domain & legislative QA)",
+      "code_and_tool_calling": "1.0B tokens (Tree-sitter validated code, JSON/bash execution)"
+    }
+  },
   "target_hardware": {
     "cluster": "Google Cloud TPU v5e-128 Pod Slice",
     "chips": 128,
     "hbm_total_gb": 2048,
-    "estimated_training_days": 16.17,
+    "estimated_training_days": 16.52,
+    "phase_1_days": 14.22,
+    "phase_2_days": 1.95,
+    "phase_3_days": 0.35,
     "grant_window_days": 28.0,
-    "safety_contingency_buffer_days": 11.83
+    "safety_contingency_buffer_days": 11.48
   }
 }
