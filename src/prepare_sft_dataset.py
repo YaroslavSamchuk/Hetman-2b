@@ -54,6 +54,8 @@ def sanitize_and_normalize_conversation(
     for msg in messages:
         raw_role = msg.get("role", "").strip().lower()
         content = msg.get("content", "").strip()
+        # Normalize Ukrainian apostrophe variants (ʼ, ’, `) to standard ASCII quote '
+        content = re.sub(r"[\u02BC\u2019\u0060]", "'", content)
         role = ROLE_ALIASES.get(raw_role)
         
         if not role or not content:

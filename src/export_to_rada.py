@@ -259,6 +259,7 @@ if __name__ == "__main__":
         hopfield_subquery_dim=128
     )
     model = HetmanForCausalLM(mini_cfg)
-    test_out = os.path.join("..", "rada.cpp", "models", "hetman_mini.rada")
+    test_out = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "rada.cpp", "models", "hetman_mini.rada"))
+    os.makedirs(os.path.dirname(test_out), exist_ok=True)
     export_model_to_rada(model, test_out)
     print("=== Export Bridge Test Passed! ===")
