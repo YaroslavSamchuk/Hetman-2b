@@ -6,7 +6,7 @@ Special Tokens: <s>, </s>, <unk>, <pad>, <|im_start|>, <|im_end|>, <think>, </th
 
 import os
 import json
-from typing import List, Optional
+from typing import List
 from tokenizers import Tokenizer, models, pre_tokenizers, decoders, trainers, processors
 
 SPECIAL_TOKENS = [

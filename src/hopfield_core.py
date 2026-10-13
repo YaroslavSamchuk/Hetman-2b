@@ -118,25 +118,29 @@ class SpeculativeLatentHopfieldCore(nn.Module):
                 target_f1 = self.topk_1 / float(self.codebook_size)
                 target_f2 = self.topk_2 / float(self.codebook_size)
                 
-                err1 = f1 - target_f1
-                err2 = f2 - target_f2
+                # Normalized relative error avoids quadratic asymmetry and slot starvation
+                err1 = (f1 - target_f1) / target_f1
+                err2 = (f2 - target_f2) / target_f2
                 
                 d_err1 = err1 - self.prev_err1
                 d_err2 = err2 - self.prev_err2
                 
-                # Non-linear quadratic PID update: b <- b - ki * e * |e| - kd * de
-                self.b1.sub_(self.pid_ki * err1 * torch.abs(err1) + self.pid_kd * d_err1)
-                self.b2.sub_(self.pid_ki * err2 * torch.abs(err2) + self.pid_kd * d_err2)
+                # Symmetric normalized PID update
+                self.b1.sub_(self.pid_ki * err1 + self.pid_kd * d_err1)
+                self.b2.sub_(self.pid_ki * err2 + self.pid_kd * d_err2)
                 
-                # Clamp biases to prevent oscillation
-                self.b1.clamp_(-1.0, 1.0)
-                self.b2.clamp_(-1.0, 1.0)
+                # Clamp biases to prevent runaway drift
+                self.b1.clamp_(-0.5, 0.5)
+                self.b2.clamp_(-0.5, 0.5)
                 
                 self.prev_err1.copy_(err1)
                 self.prev_err2.copy_(err2)
         
         # 4. Joint bilinear activation weights for Top-32 active pairs
-        pair_scores = top1_vals.unsqueeze(-1) + top2_vals.unsqueeze(-2)  # [B, L, 16, 8, 4]
+        # Gather uncorrupted raw similarity scores for faithful associative weighting
+        raw_top1_vals = torch.gather(S1_raw, dim=-1, index=top1_idx)
+        raw_top2_vals = torch.gather(S2_raw, dim=-1, index=top2_idx)
+        pair_scores = raw_top1_vals.unsqueeze(-1) + raw_top2_vals.unsqueeze(-2)  # [B, L, 16, 8, 4]
         pair_scores_flat = pair_scores.view(B, L, self.num_groups, self.topk_1 * self.topk_2)
         attn_weights = F.softmax(self.beta * pair_scores_flat, dim=-1)  # [B, L, 16, 32]
         
@@ -174,7 +178,11 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         c2_active = C2_norm[torch.arange(self.num_groups, device=x.device).view(1, 1, self.num_groups, 1), top2_idx]
         c2_bar = (weights_c2 * c2_active).sum(dim=-2)
         
-        commit_loss = F.mse_loss(q1, c1_bar.detach()) + 0.25 * F.mse_loss(q1.detach(), c1_bar) + \
-                      F.mse_loss(q2, c2_bar.detach()) + 0.25 * F.mse_loss(q2.detach(), c2_bar)
+        commit_loss = (
+            F.mse_loss(q1, c1_bar.detach(), reduction='none').sum(dim=-1).mean() +
+            0.25 * F.mse_loss(q1.detach(), c1_bar, reduction='none').sum(dim=-1).mean() +
+            F.mse_loss(q2, c2_bar.detach(), reduction='none').sum(dim=-1).mean() +
+            0.25 * F.mse_loss(q2.detach(), c2_bar, reduction='none').sum(dim=-1).mean()
+        )
                       
         return y_know, commit_loss

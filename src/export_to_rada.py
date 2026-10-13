@@ -5,12 +5,11 @@ Generates 64-byte aligned Rada containers for instant mmap loading in rada.cpp.
 """
 
 import os
-import sys
 import struct
 import zlib
 import numpy as np
 import torch
-from typing import Dict, List, Tuple
+from typing import Tuple, Optional
 from configuration_hetman import HetmanConfig
 from modeling_hetman import HetmanForCausalLM
 
@@ -67,7 +66,7 @@ def pack_ternary_to_2bit(weights: torch.Tensor) -> Tuple[np.ndarray, float]:
         packed = np.sum(reshaped.astype(np.uint32) << shifts, axis=1, dtype=np.uint32)
         return packed, gamma
 
-def export_model_to_rada(model: HetmanForCausalLM, output_path: str, tokenizer_path: str = None):
+def export_model_to_rada(model: HetmanForCausalLM, output_path: str, tokenizer_path: Optional[str] = None):
     """
     Exports a HetmanForCausalLM PyTorch model into an optimized single-file .rada binary file.
     """
@@ -82,9 +81,10 @@ def export_model_to_rada(model: HetmanForCausalLM, output_path: str, tokenizer_p
         shape = list(param_data.shape)
         
         # Decide quantization format:
-        # BitLinear weights and Hopfield attractor V are packed to 2-bit ternary
-        # Note: V_shared is a continuous anchor vector and must NOT be quantized to ternary
-        is_ternary = ("proj.weight" in name) or ("C1" not in name and "C2" not in name and ".V" in name and "V_shared" not in name and "norm" not in name and "embed" not in name)
+        # Note: continuous gates (alpha_proj, beta_proj, gate_proj, fusion_gate) and V_shared must remain continuous FP16/BF16
+        is_continuous_gate = any(k in name for k in ["alpha_proj", "beta_proj", "gate_proj", "fusion_gate"])
+        is_ternary = (("proj.weight" in name and not is_continuous_gate) or 
+                      ("C1" not in name and "C2" not in name and ".V" in name and "V_shared" not in name and "norm" not in name and "embed" not in name))
         
         if is_ternary and param_data.numel() > 1024:
             packed_data, gamma = pack_ternary_to_2bit(param_data)

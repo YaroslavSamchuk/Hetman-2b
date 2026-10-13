@@ -7,8 +7,8 @@ Preserves 100% natural Ukrainian morphology across all genders without artificia
 """
 
 import os
-import json
-from typing import List, Dict, Any, Tuple, Optional
+import re
+from typing import List, Dict, Optional
 import torch
 from torch.utils.data import Dataset, DataLoader
 from tokenizers import Tokenizer
@@ -98,7 +98,6 @@ def prune_historical_thoughts(messages: List[Dict[str, str]]) -> List[Dict[str, 
     Prunes reasoning scratchpads of historical assistant turns into <thought_summary>,
     strictly preserving full <think>...</think> on the final assistant turn.
     """
-    import re
     processed = []
     last_asst_idx = max((i for i, m in enumerate(messages) if m["role"] == "assistant"), default=-1)
 

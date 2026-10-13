@@ -110,13 +110,7 @@ class ScopeAndComplexityVisitor(ast.NodeVisitor):
     def visit_While(self, node):
         self.cyclomatic_complexity += 1
         # Structural Infinite Loop Detection: while True / while 1 without break/return/raise
-        is_truthy = False
-        if isinstance(node.test, ast.Constant):
-            if bool(node.test.value) is True:
-                is_truthy = True
-        elif isinstance(node.test, ast.Name):
-            if node.test.id == "True":
-                is_truthy = True
+        is_truthy = (isinstance(node.test, ast.Constant) and bool(node.test.value) is True) or (isinstance(node.test, ast.Name) and node.test.id == "True")
 
         if is_truthy:
             has_exit = any(

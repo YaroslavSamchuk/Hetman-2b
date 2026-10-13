@@ -10,17 +10,13 @@ Features:
 """
 
 import os
-import time
-import math
 import json
-from typing import Dict, Any, Tuple, Optional
 import numpy as np
 
 try:
     import jax
     import jax.numpy as jnp
-    from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
-    from jax.experimental.shard_map import shard_map
+    from jax.sharding import Mesh
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
@@ -132,10 +128,12 @@ def compute_chunked_deltanet_scan_jax(
     zero_state = jnp.zeros((B, 1, H, D, D), dtype=jnp.float32)
     if prev_state is not None:
         init_state = prev_state.astype(jnp.float32)[:, None, :, :, :]
+        # Propagate initial state through cumulative inter-chunk transitions
+        S_propagated = S_inter[:, :-1, :, :, :] + jnp.matmul(init_state, A_inter[:, :-1, :, :, :])
+        S_incoming = jnp.concatenate([init_state, S_propagated], axis=1)
     else:
         init_state = zero_state
-
-    S_incoming = jnp.concatenate([init_state, S_inter[:, :-1, :, :, :]], axis=1)  # [B, num_chunks, H, D, D]
+        S_incoming = jnp.concatenate([init_state, S_inter[:, :-1, :, :, :]], axis=1)
 
     # 3. Combine incoming chunk state with intra-chunk states
     # S_full = S_incoming @ A_intra + S_intra

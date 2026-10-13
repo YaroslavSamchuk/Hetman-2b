@@ -5,13 +5,12 @@ Verifies: BitLinear, FWHT, DeltaNet with Causal 1D Conv, Global FlashAttention +
 SLH-Core v2 with Aux-Loss-Free PID Balancing, MTP Head & Composite Loss.
 """
 
-import sys
 import torch
 from configuration_hetman import HetmanConfig
-from quantization import BitLinear, blockwise_fwht
+from quantization import BitLinear
 from deltanet import GatedDeltaNet
 from hopfield_core import SpeculativeLatentHopfieldCore
-from modeling_hetman import GlobalAttention, HetmanLayer, HetmanForCausalLM, MTPHead
+from modeling_hetman import GlobalAttention, HetmanForCausalLM, MTPHead
 
 def run_tests():
     print("=" * 70)

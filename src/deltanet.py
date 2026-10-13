@@ -4,7 +4,6 @@ O(1) Memory State (128 KB per layer) with Causal 1D Depthwise Convolution (k=4)
 and Multi-Scale Decay Channels (Fast, Episodic, Anchor).
 """
 
-import math
 from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
@@ -106,19 +105,20 @@ class GatedDeltaNet(nn.Module):
         k = self.k_proj(x_eff).view(B, L, self.num_heads, self.head_dim)
         v = self.v_norm(self.v_proj(x_eff).view(B, L, self.num_heads, self.head_dim))
         
-        # Unit-normalize queries and keys for spherical numerical stability
-        q = F.normalize(q, p=2, dim=-1, eps=1e-5)
-        k = F.normalize(k, p=2, dim=-1, eps=1e-5)
+        # Unit-normalize queries and keys in FP32 for spherical numerical stability
+        q_fp32 = F.normalize(q.float(), p=2, dim=-1, eps=1e-5)
+        k_fp32 = F.normalize(k.float(), p=2, dim=-1, eps=1e-5)
+        v_fp32 = v.float()
         
         # 3. Compute data-dependent decay and learning rate gates
-        alpha = torch.sigmoid(self.alpha_proj(x_eff))  # [B, L, H] decay
-        beta = torch.sigmoid(self.beta_proj(x_eff))    # [B, L, H] write rate
+        alpha_fp32 = torch.sigmoid(self.alpha_proj(x_eff)).float()  # [B, L, H] decay
+        beta_fp32 = torch.sigmoid(self.beta_proj(x_eff)).float()    # [B, L, H] write rate
         
-        # Initialize recurrent state matrix S_0: [B, H, d_k, d_v]
+        # Initialize recurrent state matrix S_0 strictly in FP32: [B, H, d_k, d_v]
         if S is None:
-            S = torch.zeros(B, self.num_heads, self.head_dim, self.head_dim, device=x.device, dtype=x.dtype)
+            S = torch.zeros(B, self.num_heads, self.head_dim, self.head_dim, device=x.device, dtype=torch.float32)
         else:
-            S = S.clone()
+            S = S.float()
             
         outputs = []
         
@@ -126,13 +126,13 @@ class GatedDeltaNet(nn.Module):
         # S_t = S_{t-1} * alpha_t + beta_t * (v_t - S_{t-1} @ k_t) @ k_t^T
         for t in range(L):
             if state_reset_mask is not None:
-                reset_t = state_reset_mask[:, t, None, None, None]
+                reset_t = state_reset_mask[:, t, None, None, None].float()
                 S = S * reset_t
-            q_t = q[:, t]                      # [B, H, D]
-            k_t = k[:, t]                      # [B, H, D]
-            v_t = v[:, t]                      # [B, H, D]
-            a_t = alpha[:, t, :, None, None]   # [B, H, 1, 1]
-            b_t = beta[:, t, :, None, None]    # [B, H, 1, 1]
+            q_t = q_fp32[:, t]                      # [B, H, D]
+            k_t = k_fp32[:, t]                      # [B, H, D]
+            v_t = v_fp32[:, t]                      # [B, H, D]
+            a_t = alpha_fp32[:, t, :, None, None]   # [B, H, 1, 1]
+            b_t = beta_fp32[:, t, :, None, None]    # [B, H, 1, 1]
             
             # Predict retrieved value: v_pred = S_{t-1} @ k_t
             v_pred = torch.einsum('bhij,bhj->bhi', S, k_t)  # [B, H, D]
@@ -146,7 +146,7 @@ class GatedDeltaNet(nn.Module):
             
             # Retrieve output: y_t = S_t @ q_t
             y_t = torch.einsum('bhij,bhj->bhi', S, q_t)
-            outputs.append(y_t)
+            outputs.append(y_t.to(x.dtype))
             
         # Stack over sequence length
         out_stacked = torch.stack(outputs, dim=1)  # [B, L, H, D]

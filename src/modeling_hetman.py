@@ -275,6 +275,19 @@ class HetmanModel(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, List[Any]]]:
         B, L = input_ids.shape
         x = self.embed_tokens(input_ids)
+
+        if attention_mask is not None:
+            if attention_mask.dim() == 2:
+                # Expand 2D [B, S] padding mask into 4D causal boolean mask [B, 1, L, S]
+                B_m, S_m = attention_mask.shape
+                causal_triangle = torch.tril(torch.ones((L, S_m), device=input_ids.device, dtype=torch.bool), diagonal=offset)
+                pad_bool = attention_mask.bool().unsqueeze(1).unsqueeze(2)  # [B, 1, 1, S]
+                attention_mask = causal_triangle.unsqueeze(0).unsqueeze(0) & pad_bool
+            elif attention_mask.dim() == 3:
+                # Expand 3D [B, L, S] to 4D [B, 1, L, S]
+                attention_mask = attention_mask.unsqueeze(1).bool()
+            elif attention_mask.dtype not in (torch.bool, torch.float16, torch.bfloat16, torch.float32):
+                attention_mask = attention_mask.bool()
         
         new_states = {"stem": [], "arbiter": [], "exit": [], "hypo": []}
         

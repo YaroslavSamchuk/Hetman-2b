@@ -7,7 +7,7 @@
     "total_layers": 34,
     "deltanet_layers": 28,
     "global_layers": 6,
-    "hopfield_attractors": 8388608,
+    "hopfield_attractors": 4194304,
     "active_params_per_token": 1602748416,
     "total_storage_params": 2137522176
   },
