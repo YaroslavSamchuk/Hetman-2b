@@ -9,21 +9,27 @@ import torch.nn.functional as F
 
 def fast_walsh_hadamard_transform_1d(x: torch.Tensor) -> torch.Tensor:
     """
-    1D In-place Fast Walsh-Hadamard Transform (FWHT) for a tensor of length N (power of 2).
+    Vectorized Fast Walsh-Hadamard Transform (FWHT) for tensor of length N (power of 2).
+    Computed in float32 for high numerical precision and stability, then converted back to input dtype.
     Orthogonal rotation with scale factor 1/sqrt(N).
     """
-    N = x.shape[-1]
+    orig_dtype = x.dtype
+    compute_dtype = torch.float32 if x.dtype in (torch.float16, torch.bfloat16) else x.dtype
+    out = x.to(compute_dtype)
+    N = out.shape[-1]
+    lead_shape = out.shape[:-1]
+    out = out.reshape(-1, N)
+    
     h = 1
-    out = x.clone()
     while h < N:
-        for i in range(0, N, h * 2):
-            for j in range(i, i + h):
-                x0 = out[..., j].clone()
-                x1 = out[..., j + h].clone()
-                out[..., j] = x0 + x1
-                out[..., j + h] = x0 - x1
+        out = out.reshape(-1, N // (2 * h), 2, h)
+        a = out[:, :, 0, :]
+        b = out[:, :, 1, :]
+        out = torch.stack([a + b, a - b], dim=2).reshape(-1, N)
         h *= 2
-    return out / math.sqrt(N)
+        
+    out = out.reshape(*lead_shape, N) / math.sqrt(N)
+    return out.to(orig_dtype)
 
 def blockwise_fwht(x: torch.Tensor, block_size: int = 512) -> torch.Tensor:
     """
@@ -35,9 +41,9 @@ def blockwise_fwht(x: torch.Tensor, block_size: int = 512) -> torch.Tensor:
     if d % block_size != 0:
         return x  # Fallback if not divisible
     
-    x_reshaped = x.view(-1, d // block_size, block_size)
+    x_reshaped = x.reshape(-1, d // block_size, block_size)
     x_rotated = fast_walsh_hadamard_transform_1d(x_reshaped)
-    return x_rotated.view(orig_shape)
+    return x_rotated.reshape(orig_shape)
 
 class BitLinear(nn.Module):
     """
