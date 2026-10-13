@@ -23,6 +23,7 @@ orbax_checkpoints/
 
 # Logs & telemetry
 *.log
+logs/
 wandb/
 runs/
 .ipynb_checkpoints/
