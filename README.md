@@ -96,8 +96,23 @@ Expected output:
       Layers: 34 (28 DeltaNet + 6 Global Attention)
       Hopfield Core: 16 groups x 1024 x 1024 x 32 = 16.78M slots (expanded to 128 via W_expand)
 ...
+======================================================================
   ALL 6 NUMERICAL SANITY TESTS PASSED! (0 NaNs, 0 Errors)
 ```
+
+---
+
+## 🔬 Scientific Transparency & Verification Protocol
+
+To adhere to open-source rigor and distinguish between architectural projections and empirical evaluations:
+
+1. **Project Phase:** Hetman-2.0B is currently in the **Pre-Training Architecture & Engineering Phase** pending Google TPU Research Cloud (TRC) compute allocation.
+2. **Local Unit Sanity (`test_verification.py`):** Serves as a code and numerical unit test (shapes, gradient backward pass, loss reduction). It verifies mathematical soundness, not downstream NLP task performance.
+3. **Post-Training Benchmark Roadmap:** Upon pre-training completion, empirical evaluation will be conducted via `lm-evaluation-harness` across:
+   * **General Reasoning:** MMLU (5-shot), GSM8K (8-shot CoT), HumanEval (0-shot Pass@1), ARC-Challenge.
+   * **Ukrainian Sovereign Corpus:** UA-MMLU, UA-CivilLaws statutory QA.
+   * **256k Context Retrieval:** Needle-In-A-Haystack (NIAH) and Passkey Retrieval across 1k–262k depths.
+4. **Runtime Throughput Projections:** The $> 350\text{ tok/s}$ throughput target reflects the raw execution capability of the native C++20 `Rada.cpp` engine using MTP 2-token speculative lookahead on RTX 3060/4060 GPUs with compiled synthetic containers. Official linguistic throughput curves will be released with final weights.
 
 ---
 

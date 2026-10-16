@@ -27,7 +27,7 @@ When scaled down to edge-deployable regimes (< 3B parameters), forcing continuou
 Hetman-2.0B resolves these trade-offs by enforcing a strict functional decomposition of declarative knowledge retrieval and procedural algorithmic execution across a 4-stage sequential Directed Acyclic Graph (DAG):
 1. **Deep Denoising Stem (8 Layers):** A robust contextual encoder that disambiguates multilingual polysemy, normalizes token noise, and extracts deep invariant syntactic representations using Gated DeltaNet recurrent memory interleaved with Global Softmax Attention.
 2. **Triad Concurrent Processing (Batched Single-Pass Execution):** The stem output is dispatched simultaneously across three parallel accelerator streams:
-   * **Speculative Latent-Hopfield Core (SLH-Core):** A 0.544B-parameter associative memory containing **8,388,608 discrete attractor slots** ($d_v = 64$, factored across 32 minigroups of $512 \times 512$), executing sub-linear fact retrieval via sparsified 2D bilinear contractions with speculative lookahead prefetching from the previous layer.
+   * **Speculative Latent-Hopfield Core (SLH-Core):** A 0.537B-parameter associative memory containing **16,777,216 discrete attractor slots** ($d_v = 32$, factored across 16 groups of $1024 \times 1024$, linearly expanded to 128 via $W_{\text{expand}} \in \mathbb{R}^{16 \times 32 \times 128}$), executing sub-linear fact retrieval via sparsified 2D bilinear contractions with speculative lookahead prefetching from the previous layer.
    * **Continuous Representation Backbone (8 SwiGLU Layers):** A high-capacity continuous representation engine dedicated to domain syntax and semantic structures.
    * **Hypothesis Extraction Subnetwork (6 Transformer Layers):** An initial deductive hypothesis generator extracting early causal trajectories directly from the contextual stem.
    * **Adaptive Dynamic Fusion Gate:** Integrates raw context with retrieved facts, domain representations, and early hypotheses via channel-wise projection.
@@ -52,7 +52,7 @@ Hetman-2.0B provides an encyclopedic knowledge capacity of **2,137,522,176 param
 | **Embeddings** | Vocabulary Token Table | 1 Table | 1536 | $V=65,536$ | **100,663,296** | BF16 (Tied to LM Head) | 100,663,296 |
 | **Stage 1: Denoising Stem** | Contextual Denoising & Parsing | 8 Layers | 1536 | $d_{\text{ffn}}=6144$ | **276,824,064** | 1.58-bit Ternary | 276,824,064 |
 | **Stage 2: Triad Processing** | | | | | | | |
-| ↳ **Branch A: Hopfield Core**| **Associative Memory (SLH)** | **1 Macro Block**| **32 Groups** | **$32 \times 512 \times 512 \times 64$**| **544,210,944** | **1.58-bit Ternary** | **~9,437,184 (Top-32)** |
+| ↳ **Branch A: Hopfield Core**| **Associative Memory (SLH)** | **1 Macro Block**| **16 Groups** | **$16 \times 1024 \times 1024 \times 32$**| **536,936,448** | **1.58-bit Ternary + FP16 Expand** | **~9,437,184 (Top-32)** |
 | ↳ **Branch B: Domain Expert**| Continuous Representation | 8 Layers | 1536 | $d_{\text{ffn}}=6144$ | **226,492,416** | 1.58-bit Ternary | 226,492,416 |
 | ↳ **Branch C: Early Logic** | Hypothesis Subnetwork | 6 Layers | 1536 | $d_{\text{ffn}}=6144$ | **207,618,048** | 1.58-bit Ternary | 207,618,048 |
 | ↳ **Fusion Gating Layer** | Triad Projection + Gate | 1 Layer | 1536 | $3 \times 1536$ | **9,437,184** | 1.58-bit Ternary | 9,437,184 |
@@ -95,24 +95,26 @@ The stem resolves syntactic ambiguity and long-range dependencies through an **I
 
 ### 3.2. Stage 2: Triad Concurrent Processing & Speculative Hopfield Memory
 
-#### Branch A: Speculative Latent-Hopfield Core (SLH-Core, 8.39M Slots)
+#### Branch A: Speculative Latent-Hopfield Core (SLH-Core, 16.78M Slots)
 1. **Speculative Lookahead Prefetching:**
    The router for the Hopfield Core is executed as a speculative draft projector at the output of Stem Layer 7. While Stem Layer 8 executes its dense compute, the GPU/TPU DMA controller issues asynchronous transfers (`cuda::memcpy_async` / Pallas tile prefetch) to load the Top-32 memory values directly into L2 cache / SRAM buffers, eliminating global DRAM stalls.
 2. **Sub-Query Decomposition & Spherical Manifold:**
    $$z = \text{RMSNorm}(\text{BitLinear}(X_{\text{stem}}, W_{\text{qh}})) \in \mathbb{R}^{B \times L \times 2048}$$
-   For each minigroup $g \in \{1, \dots, 32\}$, $z$ splits into unit-normalized sub-queries $q_{g, 1}, q_{g, 2} \in \mathbb{S}^{31} \subset \mathbb{R}^{32}$ ($W_{\text{qh}} \in \mathbb{R}^{1536 \times 2048}$).
-3. **Dual Codebook Cosine Retrieval:**
-   $$S_1^{(g)}[b, l, u] = q_{g, 1}[b, l] \cdot \hat{C}_1^{(g)}[u]^T, \quad S_2^{(g)}[b, l, v] = q_{g, 2}[b, l] \cdot \hat{C}_2^{(g)}[v]^T$$
-   where $\hat{C}_1^{(g)}, \hat{C}_2^{(g)} \in \mathbb{R}^{512 \times 32}$ are unit-normalized codebooks per minigroup ($32 \times 512 \times 512 = 8,388,608$ discrete attractor slots Pod-wide).
+   For each group $g \in \{1, \dots, 16\}$, $z$ splits into unit-normalized sub-queries $q_{g, 1}, q_{g, 2} \in \mathbb{S}^{63} \subset \mathbb{R}^{64}$ ($W_{\text{qh}} \in \mathbb{R}^{1536 \times 2048}$).
+3. **Dual Codebook Cosine Retrieval & Aux-Loss-Free PID Load Balancing:**
+   $$S_1^{(g)}[b, l, u] = q_{g, 1}[b, l] \cdot \hat{C}_1^{(g)}[u]^T + b_1^{(g)}[u], \quad S_2^{(g)}[b, l, v] = q_{g, 2}[b, l] \cdot \hat{C}_2^{(g)}[v]^T + b_2^{(g)}[v]$$
+   where $\hat{C}_1^{(g)}, \hat{C}_2^{(g)} \in \mathbb{R}^{1024 \times 64}$ are unit-normalized codebooks per group ($16 \times 1024 \times 1024 = 16,777,216$ discrete attractor slots Pod-wide). Dynamic router biases $b_1, b_2$ are updated via normalized symmetric PID load balancing, preventing slot starvation without auxiliary loss conflicts.
 4. **Top-$k$ Sparsification ($k_1=8, k_2=4 \implies K=32$):**
    Active slot indices: $\mathcal{K}_1 = \text{argtopk}(S_1^{(g)}, 8)$, $\mathcal{K}_2 = \text{argtopk}(S_2^{(g)}, 4)$.
-   Normalized weights: $\widetilde{A}_{ij}^{(g)} = \text{Softmax}(\beta \cdot (S_1^{(g)}[i] + S_2^{(g)}[j]))$ across the 32 active pairs.
-5. **Tile-Streamed Pallas Bilinear Contraction:**
-   Value tensor $V \in \{-1, 0, +1\}^{32 \times 512 \times 512 \times 64}$ ($536,870,912$ parameters total). 
-   * Packed 2-bit storage requires only **~105 MB VRAM**.
-   * Pallas / Triton kernels stream $V$ in **512 KB double-buffered tiles** from HBM to VMEM/SRAM, accumulating ternary values via signed additions/subtractions:
-     $$m^{(g)}[b, l, d] = \sum_{(u, v) \in \mathcal{K}_1 \times \mathcal{K}_2} \widetilde{A}_{uv}^{(g)} \cdot V^{(g)}[u, v, d] \in \mathbb{R}^{64}$$
-6. **Knowledge Projection:** $Y_{\text{know}} = \text{BitLinear}([m^{(1)}, \dots, m^{(32)}], W_{\text{out\_hop}}) \in \mathbb{R}^{B \times L \times 1536}$.
+   Normalized weights: $\widetilde{A}_{ij}^{(g)} = \text{Softmax}(\beta \cdot (S_{1, \text{raw}}^{(g)}[i] + S_{2, \text{raw}}^{(g)}[j]))$ across the 32 active pairs ($\beta = 1/\sqrt{32} \approx 0.1768$).
+5. **Tile-Streamed Bilinear Contraction & Linear Expansion:**
+   Value tensor $V \in \{-1, 0, +1\}^{16 \times 1024 \times 1024 \times 32}$ ($536,870,912$ parameters total). 
+   * Packed 2-bit storage requires only **~105 MB VRAM** (128 MB packed).
+   * Vectorized 64-bit `uint2` memory transfers load 8 bytes per slot, cutting DRAM gather bandwidth by 75% to **4 KB per token**.
+   * Micro-fact accumulation followed by 128-dim linear projection:
+     $$m_{\text{dyn}}^{(g)}[b, l, d] = \sum_{(u, v) \in \mathcal{K}_1 \times \mathcal{K}_2} \widetilde{A}_{uv}^{(g)} \cdot V^{(g)}[u, v, d] \in \mathbb{R}^{32}$$
+     $$m^{(g)}[b, l, e] = \sum_{d=1}^{32} m_{\text{dyn}}^{(g)}[b, l, d] \cdot W_{\text{expand}}^{(g)}[d, e] + V_{\text{shared}}^{(g)}[e] \in \mathbb{R}^{128}$$
+6. **Knowledge Projection:** $Y_{\text{know}} = \text{BitLinear}([m^{(1)}, \dots, m^{(16)}], W_{\text{out\_hop}}) \in \mathbb{R}^{B \times L \times 1536}$ ($2048 \to 1536$).
 
 #### Branch B: Continuous Representation Backbone (8 SwiGLU Layers)
 Processes $X_{\text{stem}}$ through 8 deep SwiGLU layers to construct continuous domain representations ($226,492,416$ parameters):
@@ -332,22 +334,40 @@ Hetman-2.0B guarantees full 256,000-token execution on consumer graphics cards s
 
 ---
 
-## 9. EVALUATION MATRIX & OPEN SCIENCE PROTOCOL
+## 9. EVALUATION MATRIX, VERIFICATION PROTOCOL & OPEN SCIENCE
 
-### 9.1. Benchmark Evaluation Suite
-* **General World Knowledge:** MMLU (5-shot), ARC-Challenge (25-shot).
-* **Reasoning & Mathematics:** GSM8k (8-shot CoT), MATH (4-shot).
-* **Code Synthesis:** HumanEval (0-shot), MBPP (3-shot).
-* **Ukrainian Language Understanding:** UA-MMLU (Ukrainian translated & native benchmark), UA-CivilLaws (legislative reasoning QA).
-* **Long-Context Retrieval:** Needle-In-A-Haystack (retrieval fidelity up to 262,144 tokens).
+### 9.1. Unit Verification vs. Post-Training Empirical Benchmark Roadmap
+To ensure strict scientific transparency and maintain academic rigor, the project enforces a clear separation between pre-training unit verification and post-training linguistic evaluation:
 
-### 9.2. Open-Source Charter & Reproducibility
+1. **Local Architecture & Numerical Sanity Suite (`src/test_verification.py`):**
+   * **Scope:** Unit-level verification of tensor algebra, forward/backward gradient flow, Straight-Through Estimator (STE) gradient passage, FWHT energy preservation, and NaN prevention across all 34 layers.
+   * **Role:** Developer sanity check ensuring zero runtime crashes, proper dimension alignment, and active gradient propagation before launching multi-node TPU pre-training. It does *not* substitute for downstream linguistic intelligence evaluation.
+2. **Post-Training Empirical Benchmark Suite (via `lm-evaluation-harness`):**
+   * **General World Knowledge:** MMLU (5-shot), ARC-Challenge (25-shot), HellaSwag (10-shot).
+   * **Reasoning & Mathematics:** GSM8k (8-shot CoT), MATH (4-shot).
+   * **Code Synthesis:** HumanEval (0-shot Pass@1), MBPP (3-shot).
+   * **Ukrainian Sovereign Understanding:** UA-MMLU (comprehensive Ukrainian knowledge), UA-CivilLaws (formal statutory reasoning and legal QA).
+   * **Long-Context Retrieval Fidelity:** Needle-In-A-Haystack (NIAH) and Passkey Retrieval (evaluating 100% retrieval accuracy at depths from 1k to 262,144 tokens across Phase 2 checkpoints).
+
+### 9.2. Long-Context (256k) Ingestion: Chunked Prefill Architecture
+While autoregressive token generation (decoding) over the KV cache is strictly $O(L)$ per step, prompt ingestion (prefill) across the 6 Global Softmax FlashAttention layers requires $O(L^2)$ attention computations.
+
+To guarantee that a 262,144-token document can be ingested on consumer GPUs with only 6 GB VRAM without triggering Out-Of-Memory (OOM) activation spikes:
+* **Chunked FlashAttention Prefill ($B_{\text{chunk}} = 4096 / 8192$):** Long prompts are partitioned into 4096-token chunks. The 28 Gated DeltaNet layers process chunks sequentially in $O(L)$ time with fixed $O(1)$ state carryover (3.67 MB). The 6 Global Attention layers execute incremental block-sparse FlashAttention, bounding peak activation workspace to $< 350\text{ MB}$.
+* **VRAM Cap:** Total peak memory during 256k prefill remains strictly below **2.35 GB**, leaving $> 3.65\text{ GB}$ of headroom on an RTX 2060 (6 GB).
+
+### 9.3. Empirical Hardware Profiling & Reproduction Protocol
+Performance projections and measured engine throughputs are subject to a standardized reproduction harness in `Rada.cpp`:
+* **Test Platform:** NVIDIA GeForce RTX 3060 12GB (Desktop) / RTX 4060 8GB (Mobile) / RTX 2060 6GB.
+* **Driver & Software Stack:** NVIDIA CUDA 12.x / MSVC 19.4x (C++20), Batch Size = 1, Greedy / Temperature = 0.7.
+* **Speculative Lookahead:** The $> 350\text{ tok/s}$ target is driven by the 2-token MTP speculative drafting engine, verified via synthetic binary containers in `rada_cli` prior to full-scale pre-training weight convergence. Final linguistic throughput will be published alongside checkpoint release.
+
+### 9.4. Open-Source Charter & Reproducibility
 * **License:** **Apache License 2.0** (100% Free, Permissive, Commercial & Non-Commercial use permitted without royalty).
 * **Public Artifacts:** All pre-trained model weights, tokenizer tables, JAX Pallas training kernels, evaluation scripts, and synthetic data recipes will be published without restriction on Hugging Face ([YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)).
 * **Local Privacy Guarantee:** The model operates strictly local and offline. Zero telemetry, zero external API queries, zero cloud lock-in.
 
-### 9.3. Co-Designed Native Runtime: `Rada.cpp`
+### 9.5. Co-Designed Native Runtime: `Rada.cpp`
 To deliver peak throughput on consumer hardware without the bloat and mismatched primitives of standard Transformer runtimes, Hetman-2.0B is deployed via **`Rada.cpp`**:
 * **Etymology & Philosophy:** Named after the historical Ukrainian **Козацька Рада** (Cossack Council) and the concept of *«радитися»* (deliberating, consulting, seeking wise counsel) — symbolizing collective wisdom, autonomy, and deliberative decision-making.
 * **Technical Purpose:** A lightweight, pure C++20 / CUDA / Vulkan inference runtime built specifically for ternary BitNet operations, Walsh-Hadamard rotations, Gated DeltaNet state tracking, and factorized Hopfield associative retrieval.
-* **Full Specification:** Detailed in the companion architectural blueprint: `RADA_CPP_TECHNICAL_SPECIFICATION.md`.
