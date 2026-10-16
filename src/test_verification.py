@@ -22,7 +22,7 @@ def run_tests():
     print(f"[1/6] Configuration:")
     print(f"      Vocab: {cfg.vocab_size} | Hidden: {cfg.hidden_size} | FFN: {cfg.intermediate_size}")
     print(f"      Layers: {cfg.num_hidden_layers} ({cfg.num_deltanet_layers} DeltaNet + {cfg.num_global_layers} Global Attention)")
-    print(f"      Hopfield Core: {cfg.hopfield_num_groups} groups x {cfg.hopfield_codebook_size} x {cfg.hopfield_codebook_size} x {cfg.hopfield_val_dim} = 8.39M slots")
+    print(f"      Hopfield Core: {cfg.hopfield_num_groups} groups x {cfg.hopfield_codebook_size} x {cfg.hopfield_codebook_size} x {cfg.hopfield_val_dim} = 16.78M slots (expanded to {cfg.hopfield_expanded_dim} via W_expand)")
     print(f"      QK-Norm Logit Bound: |S_ij| <= {cfg.qk_norm_bound:.4f}")
     print(f"      SwiGLU Limit: {cfg.swiglu_limit} | Logit Softcap: {cfg.logit_softcap}")
 
@@ -62,7 +62,8 @@ def run_tests():
     mini_hopfield_cfg = HetmanConfig(
         hopfield_num_groups=4,
         hopfield_codebook_size=32,
-        hopfield_val_dim=64,
+        hopfield_val_dim=16,
+        hopfield_expanded_dim=64,
         hopfield_topk_1=4,
         hopfield_topk_2=2
     )
@@ -94,7 +95,8 @@ def run_tests():
         global_kv_heads=2,
         hopfield_num_groups=4,
         hopfield_codebook_size=32,
-        hopfield_val_dim=32,
+        hopfield_val_dim=16,
+        hopfield_expanded_dim=64,
         hopfield_topk_1=4,
         hopfield_topk_2=2,
         hadamard_block_size=512

@@ -1,6 +1,6 @@
 """
 Speculative Latent-Hopfield Core v2 (SLH-Core v2)
-8,388,608 Attractor Slots across 16 Groups (Val Dim 128) with Top-32 Sparse Bilinear Contraction,
+16,777,216 Attractor Slots across 16 Groups (Val Dim 32 expanded to 128) with Top-32 Sparse Bilinear Contraction,
 Shared Anchor Attractors, and Aux-Loss-Free PID Dynamic Bias Load Balancing.
 """
 
@@ -16,8 +16,9 @@ class SpeculativeLatentHopfieldCore(nn.Module):
     def __init__(self, config: HetmanConfig):
         super().__init__()
         self.num_groups = config.hopfield_num_groups         # 16 groups
-        self.codebook_size = config.hopfield_codebook_size   # 512
-        self.val_dim = config.hopfield_val_dim               # 128 (100% TPU MXU 128x128 systolic alignment)
+        self.codebook_size = config.hopfield_codebook_size   # 1024
+        self.val_dim = config.hopfield_val_dim               # 32 (fine-grained atomic micro-facts)
+        self.expanded_dim = getattr(config, "hopfield_expanded_dim", 128)  # 128 (TPU MXU systolic alignment)
         self.topk_1 = config.hopfield_topk_1                 # 8
         self.topk_2 = config.hopfield_topk_2                 # 4 (8 * 4 = 32 dynamic slots per group)
         self.beta = config.hopfield_beta                     # 1 / sqrt(32) ≈ 0.1768
@@ -31,7 +32,7 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         self.q_proj = BitLinear(config.hidden_size, self.subquery_dim, bias=False)
         self.q_norm = nn.RMSNorm(self.subquery_dim, eps=config.rms_norm_eps)
         
-        # Dual Spherical Codebooks: C1, C2 per group (each [16, 512, 64])
+        # Dual Spherical Codebooks: C1, C2 per group (each [16, 1024, 64])
         self.C1 = nn.Parameter(torch.randn(self.num_groups, self.codebook_size, self.code_dim))
         self.C2 = nn.Parameter(torch.randn(self.num_groups, self.codebook_size, self.code_dim))
         
@@ -41,16 +42,20 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         self.register_buffer("prev_err1", torch.zeros(self.num_groups, self.codebook_size))
         self.register_buffer("prev_err2", torch.zeros(self.num_groups, self.codebook_size))
         
-        # Knowledge attractor value tensor V: [16, 512, 512, 128]
-        # In memory-efficient ternary {-1, 0, +1} representation (536,870,912 parameters)
+        # Knowledge attractor value tensor V: [16, 1024, 1024, 32]
+        # In memory-efficient ternary {-1, 0, +1} representation (536,870,912 parameters, 16.78M slots)
         self.V = nn.Parameter(torch.empty(self.num_groups, self.codebook_size, self.codebook_size, self.val_dim))
         
+        # Linear expansion projection W_expand: [16, 32, 128]
+        # Maps 32-dim micro-fact attractor combinations to 128-dim for 100% systolic TPU MXU saturation
+        self.W_expand = nn.Parameter(torch.empty(self.num_groups, self.val_dim, self.expanded_dim))
+        
         # 1 Shared Anchor Attractor slot per group for baseline representation stability
-        self.V_shared = nn.Parameter(torch.empty(self.num_groups, self.val_dim))
+        self.V_shared = nn.Parameter(torch.empty(self.num_groups, self.expanded_dim))
         
         # Final knowledge output projection back to hidden size (1536)
         # 16 groups * 128 dim = 2048 -> 1536
-        self.out_proj = BitLinear(self.num_groups * self.val_dim, config.hidden_size, bias=False)
+        self.out_proj = BitLinear(self.num_groups * self.expanded_dim, config.hidden_size, bias=False)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -61,8 +66,11 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             # Initialize ternary attractor values
             self.V.uniform_(-1.0, 1.0)
             self.V.copy_(torch.clamp(torch.round(self.V), -1.0, 1.0))
+            # Initialize linear expansion projections semi-orthogonally to preserve norm
+            for g in range(self.num_groups):
+                nn.init.orthogonal_(self.W_expand[g])
             # Initialize shared anchor attractors
-            self.V_shared.normal_(mean=0.0, std=1.0 / math.sqrt(self.val_dim))
+            self.V_shared.normal_(mean=0.0, std=1.0 / math.sqrt(self.expanded_dim))
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -156,11 +164,14 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             V_sub = Vg[idx1.unsqueeze(-1), idx2.unsqueeze(-2)]  # [B, L, 8, 4, 128]
             V_sub_flat = V_sub.view(B, L, self.topk_1 * self.topk_2, self.val_dim)
             
-            # Weighted sum over 32 active attractor slots
-            m_dyn = torch.einsum('bls,blsd->bld', weights_g, V_sub_flat)  # [B, L, 128]
+            # Weighted sum over 32 active attractor slots (32-dim micro-fact representation)
+            m_dyn = torch.einsum('bls,blsd->bld', weights_g, V_sub_flat)  # [B, L, 32]
+            
+            # Linear expansion: 32 -> 128 for 100% systolic TPU MXU saturation
+            m_expanded = torch.einsum('bld,de->ble', m_dyn, self.W_expand[g])  # [B, L, 128]
             
             # Add shared anchor attractor slot
-            m_g = m_dyn + self.V_shared[g].unsqueeze(0).unsqueeze(0)
+            m_g = m_expanded + self.V_shared[g].unsqueeze(0).unsqueeze(0)
             group_outputs.append(m_g)
             
         # Concatenate across all 16 groups: [B, L, 16 * 128 = 2048]

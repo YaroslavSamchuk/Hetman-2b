@@ -24,10 +24,11 @@ class HetmanConfig:
     global_kv_heads: int = 2             # Grouped Query Attention (GQA 12:2)
     
     # Speculative Latent-Hopfield Core v2 (SLH-Core v2)
-    # Tensor V: [16, 512, 512, 128] = 536,870,912 elements (100% TPU MXU 128x128 systolic alignment)
+    # Tensor V: [16, 1024, 1024, 32] = 536,870,912 elements (16.78M Attractor Slots, 100% TPU MXU aligned)
     hopfield_num_groups: int = 16
-    hopfield_codebook_size: int = 512
-    hopfield_val_dim: int = 128
+    hopfield_codebook_size: int = 1024
+    hopfield_val_dim: int = 32
+    hopfield_expanded_dim: int = 128     # Projected to 128 via W_expand for TPU MXU 128x128 systolic alignment
     hopfield_topk_1: int = 8
     hopfield_topk_2: int = 4             # 8 * 4 = 32 active dynamic slots per group
     hopfield_shared_attractors: int = 1  # 1 shared anchor attractor slot per group
