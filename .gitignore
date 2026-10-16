@@ -20,6 +20,9 @@ ENV/
 *.rada
 checkpoints/
 orbax_checkpoints/
+data/
+*.idx
+*.partial
 
 # Logs & telemetry
 *.log

@@ -1,0 +1,198 @@
+{
+  "experiment_name": "hetman_2b_pilot_200m_abc",
+  "total_tokens_per_recipe": 200000000,
+  "sequence_length": 4096,
+  "total_sequences_per_recipe": 48828,
+  "token_accounting": {
+    "target_is_exact": true,
+    "packing": "concatenate tokenized documents within each source allocation, then emit full 4096-token sequences",
+    "final_sequence_policy": "retain an explicit final partial sequence or mask its padding; never count padding toward target_tokens",
+    "full_sequences": 48828,
+    "remainder_tokens": 512,
+    "note": "200,000,000 is not divisible by 4096; 48,828 full sequences contain 199,999,488 tokens plus 512 target tokens. Per-source sequence counts are ceilings for capacity estimates and must not be summed as exact token counts."
+  },
+  "tokenized_output": {
+    "format": "mmap_bin_idx",
+    "data_extension": ".bin",
+    "index_extension": ".idx",
+    "dtype": "uint32",
+    "index_fields": ["sequence_offset", "token_count", "source_id", "split"],
+    "shard_max_tokens": 1000000000
+  },
+  "validation_split": {
+    "method": "stable_hash_by_source_and_document_id",
+    "fraction_per_source": 0.01,
+    "seed": 42,
+    "split_before_curation": true,
+    "deduplicate_validation_against_train": true,
+    "keep_benchmark_prompts_out_of_validation": true,
+    "perplexity_sets_are_separate_from_zero_shot_benchmarks": true
+  },
+  "data_root_env_var": "HETMAN_DATA_ROOT",
+  "default_data_root": "data/raw",
+  "corpora_sources": {
+    "ubertext_2.0": {
+      "name": "UberText 2.0 (Ukrainian News & Web)",
+      "language": "uk",
+      "doc_type": "general_web",
+      "license": "CC-BY-4.0",
+      "local_path": "data/raw/ubertext_2.0",
+      "hf_dataset_id": "vblago/ubertext2.0",
+      "format": "jsonl",
+      "text_column": "text"
+    },
+    "laws_ua": {
+      "name": "Laws and Court Decisions of Ukraine",
+      "language": "uk",
+      "doc_type": "legal",
+      "license": "Public Domain",
+      "local_path": "data/raw/laws_ua",
+      "hf_dataset_id": null,
+      "format": "jsonl",
+      "text_column": "text"
+    },
+    "fineweb_edu": {
+      "name": "FineWeb-Edu (English High-Quality Educational)",
+      "language": "en",
+      "doc_type": "educational",
+      "license": "ODC-By",
+      "local_path": "data/raw/fineweb_edu",
+      "hf_dataset_id": "HuggingFaceFW/fineweb-edu",
+      "format": "parquet",
+      "text_column": "text"
+    },
+    "starcoder2_code": {
+      "name": "StarCoder2 Clean Multi-Language Code",
+      "language": "code",
+      "doc_type": "code",
+      "license": "Apache-2.0 / MIT",
+      "local_path": "data/raw/starcoder2_code",
+      "hf_dataset_id": "bigcode/starcoder2-data",
+      "format": "parquet",
+      "text_column": "content"
+    },
+    "stem_math": {
+      "name": "OpenWebMath & Scientific arXiv Snippets",
+      "language": "en",
+      "doc_type": "stem",
+      "license": "CC-BY-4.0",
+      "local_path": "data/raw/stem_math",
+      "hf_dataset_id": "open-web-math/open-web-math",
+      "format": "parquet",
+      "text_column": "text"
+    },
+    "ua_dialogues": {
+      "name": "Ukrainian Dialogues, QA & Synthetic Instruct",
+      "language": "uk",
+      "doc_type": "dialogue",
+      "license": "CC-BY-4.0",
+      "local_path": "data/raw/ua_dialogues",
+      "hf_dataset_id": null,
+      "format": "jsonl",
+      "text_column": "text"
+    }
+  },
+  "recipes": {
+    "recipe_a_baseline": {
+      "description": "Baseline: Raw uncurated mixture (naive TTR >= 0.20, no near-dedup, no decontamination)",
+      "target_tokens": 200000000,
+      "pipeline_version": "v1.0-naive",
+      "curation_applied": false,
+      "mixture": {
+        "ubertext_2.0": {
+          "percentage": 60.0,
+          "tokens": 120000000,
+          "sequences_4k": 29297
+        },
+        "fineweb_edu": {
+          "percentage": 25.0,
+          "tokens": 50000000,
+          "sequences_4k": 12207
+        },
+        "laws_ua": {
+          "percentage": 15.0,
+          "tokens": 30000000,
+          "sequences_4k": 7324
+        }
+      }
+    },
+    "recipe_b_cleaned": {
+      "description": "Cleaned: Exact same source distribution as Recipe A, but processed via v2.0-Production pipeline (STTR w=200, domain MinHash LSH, 13-gram decontamination, full apostrophe normalization)",
+      "target_tokens": 200000000,
+      "pipeline_version": "v2.0-Production",
+      "curation_applied": true,
+      "estimated_raw_intake_tokens": 260000000,
+      "mixture": {
+        "ubertext_2.0": {
+          "percentage": 60.0,
+          "tokens": 120000000,
+          "sequences_4k": 29297
+        },
+        "fineweb_edu": {
+          "percentage": 25.0,
+          "tokens": 50000000,
+          "sequences_4k": 12207
+        },
+        "laws_ua": {
+          "percentage": 15.0,
+          "tokens": 30000000,
+          "sequences_4k": 7324
+        }
+      }
+    },
+    "recipe_c_balanced": {
+      "description": "Balanced: Target multi-domain 35/25/15/15/5/5 mixture processed via v2.0-Production pipeline",
+      "target_tokens": 200000000,
+      "pipeline_version": "v2.0-Production",
+      "curation_applied": true,
+      "estimated_raw_intake_tokens": 255000000,
+      "mixture": {
+        "ubertext_2.0": {
+          "percentage": 35.0,
+          "tokens": 70000000,
+          "sequences_4k": 17090
+        },
+        "fineweb_edu": {
+          "percentage": 25.0,
+          "tokens": 50000000,
+          "sequences_4k": 12207
+        },
+        "starcoder2_code": {
+          "percentage": 15.0,
+          "tokens": 30000000,
+          "sequences_4k": 7324
+        },
+        "laws_ua": {
+          "percentage": 15.0,
+          "tokens": 30000000,
+          "sequences_4k": 7324
+        },
+        "stem_math": {
+          "percentage": 5.0,
+          "tokens": 10000000,
+          "sequences_4k": 2441
+        },
+        "ua_dialogues": {
+          "percentage": 5.0,
+          "tokens": 10000000,
+          "sequences_4k": 2442
+        }
+      }
+    }
+  },
+  "validation_benchmarks": {
+    "perplexity_domains": [
+      {"name": "ukr_general_val", "type": "prose", "target_tokens": 500000},
+      {"name": "ukr_legal_val", "type": "legal", "target_tokens": 500000},
+      {"name": "fineweb_edu_val", "type": "educational", "target_tokens": 500000},
+      {"name": "code_python_val", "type": "code", "target_tokens": 500000}
+    ],
+    "zero_shot_tasks": [
+      "UA-MMLU",
+      "MMLU-en",
+      "ARC-Challenge",
+      "HumanEval-Python",
+      "GSM8K"
+    ]
+  }
+}

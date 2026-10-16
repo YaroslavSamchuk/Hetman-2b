@@ -7,9 +7,17 @@
     "total_layers": 34,
     "deltanet_layers": 28,
     "global_layers": 6,
+    "global_attention_heads": 12,
+    "global_kv_heads": 2,
+    "hopfield_groups": 16,
+    "hopfield_codebook_size": 1024,
+    "hopfield_val_dim": 32,
+    "hopfield_expanded_dim": 128,
     "hopfield_attractors": 16777216,
-    "active_params_per_token": 1602748416,
-    "total_storage_params": 2137522176
+    "base_storage_params": 2136134016,
+    "total_storage_params_with_mtp": 2165397888,
+    "base_active_params_inference": 1599372672,
+    "training_active_params_with_mtp": 1627696512
   },
   "training_schedule": {
     "total_tokens": 855000000000,
