@@ -68,7 +68,12 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             self.V.copy_(torch.clamp(torch.round(self.V), -1.0, 1.0))
             # Initialize linear expansion projections semi-orthogonally to preserve norm
             for g in range(self.num_groups):
-                nn.init.orthogonal_(self.W_expand[g])
+                if self.W_expand.dtype == torch.bfloat16:
+                    W_f32 = torch.empty_like(self.W_expand[g], dtype=torch.float32)
+                    nn.init.orthogonal_(W_f32)
+                    self.W_expand[g].copy_(W_f32.to(torch.bfloat16))
+                else:
+                    nn.init.orthogonal_(self.W_expand[g])
             # Initialize shared anchor attractors
             self.V_shared.normal_(mean=0.0, std=1.0 / math.sqrt(self.expanded_dim))
 
