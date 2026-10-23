@@ -4,15 +4,34 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-YSamchuk%2FHetman--2b-yellow)](https://huggingface.co/YSamchuk/Hetman-2b)
 [![Target-Hardware](https://img.shields.io/badge/Target_Edge-NVIDIA_RTX_2060+_>=6GB-green.svg)](#)
-[![Pretrain-Platform](https://img.shields.io/badge/Pretraining-Google_TPU_v5e--128-orange.svg)](#)
+[![Pretrain-Platform](https://img.shields.io/badge/Pretraining-Cloud_TPU_v5e--128-orange.svg)](#)
 [![Context-Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
 [![Speculative-Decoding](https://img.shields.io/badge/MTP_Drafting->350_tok/s-red.svg)](#)
 
 ---
 
-## 📌 Executive Summary
+> 📢 **Status & Weight Availability (Honest & Transparent):**  
+> **The architecture, tokenizer, and training/inference toolchains are 100% complete, verified, and open-source.**  
+> The final model weights are **not yet trained**. We are currently in the pre-training preparation phase for the 855-billion-token run across Cloud TPU v5e-128 accelerator pods.  
+> 
+> **What you can explore and run right now:**
+> - **Production Tokenizer:** Test the 65,536-token Cyrillic & code BPE tokenizer (`tokenizer/`).
+> - **Local Sanity Check:** Verify tensor shapes, BitLinear STE, FWHT, and Hopfield associative memory on CPU in < 5 seconds (`python src/test_verification.py`).
+> - **Native C++ Runtime:** Build and test [`Rada.cpp`](https://github.com/YaroslavSamchuk/Rada.cpp) with our bundled test container (`hetman_mini.rada`).
+> - **Autonomous Autopilot:** Inspect and simulate the set-and-forget orchestration engine (`python src/train_autopilot.py --dry_run`).
+> 
+> As soon as the Cloud TPU pre-training run concludes, all model checkpoints (`model.safetensors` and `.rada` containers) will be published directly to Hugging Face and GitHub Releases.
 
-**Hetman-2.0B** is an open-source, edge-native sovereign foundation model engineered from first principles for high-throughput pre-training on **Cloud TPU v5e-128 Pod Slices** (High-Performance Cloud Accelerator Cluster) and cost-effective local inference on accessible consumer GPUs with **$\ge 6$ GB VRAM** (NVIDIA GeForce RTX 2060 6GB+, RTX 3060, RTX 4060, and Apple Silicon).
+---
+
+## 💡 Why We Built Hetman-2.0B
+
+Small language models (sub-3B) are the secret weapon of private, on-device AI. But until now, they suffered from a painful tradeoff: either their context was capped at 4k–8k tokens, or scaling to 64k–256k caused standard KV-caches to balloon past 16 GB of VRAM, choking consumer hardware. Furthermore, existing models treat non-Latin alphabets as an afterthought, ballooning token counts on Ukrainian and European languages.
+
+We designed **Hetman-2.0B** from first principles to solve this:
+1. **True 256k Context on a \$200 GPU:** By pairing 28 Gated DeltaNet recurrent memory layers ($O(1)$ state) with 6 interleaved Global FlashAttention anchor layers, the memory footprint remains under **2.00 GB VRAM** even at 256k tokens.
+2. **1.58-Bit Ternary Weights (BitNet b1.58):** Eliminates costly floating-point matrix multiplications, replacing them with integer additions and subtractions.
+3. **Cyrillic & Code First-Class Citizen:** With a custom 65,536-token BPE vocabulary, token fertility drops to $\le 1.18$ tokens/word on Ukrainian text (saving 32% compute compared to Llama-3).
 
 * **Nominal Capacity:** 2,137,522,176 parameters (~2.138B storage footprint).
 * **Active Compute per Token:** ~1,602,748,416 parameters (~1.603B active compute) via Top-32 sparse associative memory retrieval.

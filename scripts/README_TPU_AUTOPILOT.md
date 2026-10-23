@@ -1,12 +1,23 @@
-# Hetman-2.0B Autonomous Autopilot Guide: Cloud TPU v5e-128
+# Autonomous Cloud Training Autopilot: Operational Field Guide
 
-This system is engineered for **fully autonomous, set-and-forget pre-training across ~16 days** on high-performance **Cloud TPU v5e-128** accelerator infrastructure.
-
-You execute **a single command** on the TPU VM, detach from the terminal, and return upon completion — all curriculum phases run automatically, and the final model is compiled into an optimized, single-file `.rada` binary container.
+> **"Set it, launch it, go to sleep."**  
+> This directory contains the autonomous lifecycle scripts that orchestrate the **Hetman-2.0B** pre-training and long-context annealing run across Cloud TPU v5e-128 pods.
 
 ---
 
-## 1. Quickstart
+## 🧭 Why We Built the Autopilot
+
+Training a 2.14B-parameter foundation model across 855 billion tokens takes ~16.5 days of non-stop compute. On cloud clusters (especially when taking advantage of spot or preemptible nodes to keep research costs sustainable), things go wrong:
+- Cloud nodes get preempted mid-epoch.
+- Transient network blips disrupt host-to-host communications.
+- Checkpoint writes can be interrupted mid-flight, leaving corrupted files.
+- Workers leak memory over dozens of consecutive hours.
+
+We wrote this Autopilot suite so no human has to sit and babysit terminal windows for 16 days. It handles crash recovery, atomic checkpoint rolling, multi-host JAX barrier re-initialization, and automatic conversion to `.rada` inference format when the final loss step completes.
+
+---
+
+## 🚀 Quickstart
 
 Once compute is provisioned and your Cloud TPU VM is created:
 
@@ -17,7 +28,10 @@ ssh <user>@<tpu-vm-ip> # or cloud CLI
 # 2. Navigate to project root
 cd Hetman-2b
 
-# 3. Launch the autonomous autopilot in the background
+# 3. Test locally first (dry run in 10 seconds)
+python src/train_autopilot.py --dry_run --max_steps 20
+
+# 4. Launch the autonomous autopilot in the background
 bash scripts/launch_autopilot.sh
 ```
 

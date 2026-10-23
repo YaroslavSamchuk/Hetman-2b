@@ -30,9 +30,16 @@ widget:
 [![Target Hardware](https://img.shields.io/badge/Target_Edge-NVIDIA_RTX_2060+_>=6GB-green.svg)](#)
 [![Context Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
 
-> ⚠️ **Project Status: Architecture & Production Tokenizer Release (Pre-Training Phase)**  
-> This repository hosts the official architectural specification, production BPE tokenizer artifacts, and complete PyTorch modeling code for **Hetman-2.0B**.  
-> **Pre-training on 855 billion tokens** across Cloud TPU v5e-128 pods is scheduled on high-throughput accelerator infrastructure. Full pre-trained weights (`model.safetensors` and `.rada` single-file containers) will be published directly to this repository upon training completion.
+> 📢 **Model Status: Architecture & Production Tokenizer Release (Pre-Training Phase)**  
+> Welcome to the official repository for **Hetman-2.0B**!  
+> **Please Note:** The final pre-trained model weights are **not yet uploaded**—the 855-billion-token pre-training run on Cloud TPU v5e-128 pods is scheduled and actively being prepared.  
+> 
+> **What is live and fully usable in this repository today:**
+> 1. **Complete Model Architecture:** Verified PyTorch code with custom modeling classes (`trust_remote_code=True`).
+> 2. **Production 65,536-Token Tokenizer:** Fully functional Byte-Level BPE tokenizer with unified Cyrillic apostrophe normalization (achieving $\le 1.18$ tokens/word on Ukrainian). Ready to tokenize/encode text today!
+> 3. **C++ Edge Inference Toolchain:** Native compatibility with [`Rada.cpp`](https://github.com/YaroslavSamchuk/Rada.cpp) for sub-2GB VRAM local execution.
+> 
+> As training milestones complete, official checkpoint weights (`model.safetensors` and `.rada` single-file containers) will be pushed directly to this model card. Feel free to clone, inspect the architecture, and test the tokenizer below!
 
 ---
 
