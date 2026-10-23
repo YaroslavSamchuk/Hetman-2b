@@ -1,11 +1,6 @@
 # Hetman-2.0B: Cloud TPU v5e-128 Autopilot Field Guide
 ### Battle-Tested Operational Manual for Unattended Multi-Week Distributed Pre-Training
 
-[![Cluster](https://img.shields.io/badge/Hardware-Cloud_TPU_v5e--128_Pod_Slice-blue.svg)](#)
-[![Capacity](https://img.shields.io/badge/Compute-25.2_PFLOPS_BF16-brightgreen.svg)](#)
-[![Total-Tokens](https://img.shields.io/badge/Curriculum-855_Billion_Tokens-purple.svg)](#)
-[![Duration](https://img.shields.io/badge/Runtime-~16.2_Days_Autonomous-orange.svg)](#)
-
 ---
 
 ## 🪖 Field Guide Philosophy: Why This Autopilot Exists

@@ -1,35 +1,10 @@
 # Hetman-2.0B: High-Efficiency Edge-Native Foundation Model
-### 2.14B Total Parameters (~1.603B Active) | BitNet b1.58 Ternary | 16.78M Hopfield Slots | 256k Context | Cloud TPU v5e-128
+### 2.14B Total Parameters (~1.603B Active) | BitNet b1.58 Ternary | 16.78M Hopfield Slots | 256k Context
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/Status-Pre--training_In_Progress-blue.svg)](#)
+[![GitHub](https://img.shields.io/badge/GitHub-Hetman--2b-black?logo=github)](https://github.com/YaroslavSamchuk/Hetman-2b)
+[![Inference Runtime](https://img.shields.io/badge/Runtime-Rada.cpp-orange)](https://github.com/YaroslavSamchuk/Rada.cpp)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-YSamchuk%2FHetman--2b-yellow)](https://huggingface.co/YSamchuk/Hetman-2b)
-[![Target-Hardware](https://img.shields.io/badge/Target_Edge-NVIDIA_RTX_2060+_>=6GB-green.svg)](#)
-[![Pretrain-Platform](https://img.shields.io/badge/Pretraining-Cloud_TPU_v5e--128-orange.svg)](#)
-[![Context-Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
-[![Speculative-Decoding](https://img.shields.io/badge/MTP_Drafting->350_tok/s-red.svg)](#)
-
----
-
-> [!IMPORTANT]
-> ### 🚧 Project Status: Architecture, Tokenizer & Systems Live — Pre-Training In Preparation / Underway
->
-> **Hetman-2.0B is being built entirely in the open. To be 100% transparent: the final model weights are NOT yet trained.**
->
-> We are currently in the active pre-training launch phase, gearing up for an **855-billion-token pre-training run on Cloud TPU v5e-128 accelerator pod slices**. The complete model architecture, production tokenizer, JAX/Pallas distributed training autopilot, and native C++20 inference engine are finished, mathematically verified, and fully open-sourced today.
->
-> #### 🛠️ What You Can Do Today:
-> 1. **Inspect the Architecture & PyTorch Code:** Explore the full 2.14B-parameter hybrid graph in [`src/modeling_hetman.py`](src/modeling_hetman.py), [`src/deltanet.py`](src/deltanet.py), [`src/hopfield_core.py`](src/hopfield_core.py), and [`src/quantization.py`](src/quantization.py).
-> 2. **Test the Production 65k Tokenizer:** Run [`tokenizer/train_tokenizer.py`](tokenizer/) or test the pretrained tokenizer via Hugging Face. It delivers outstanding Ukrainian and Cyrillic fertility ($\le 1.18$ tokens/word) with full apostrophe normalization (`ʼ`, `'`, `’`).
-> 3. **Run Fast Local Sanity Verification (< 5s):** Run `python src/test_verification.py` on any laptop CPU with `< 100 MB` RAM to verify BitLinear ternarization, FWHT rotations, DeltaNet recurrence, and QK-Norm bounds without requiring a GPU or TPU.
-> 4. **Run Deep 8-Block Verification (~30s):** Run `python src/verify_all_blocks.py` to audit full parameter breakdowns, verify gradient backpropagation through all 887 tensor parameters, test overfitting on synthetic data, and check numerical clamping edge cases.
-> 5. **Benchmark the Native C++ Engine (`Rada.cpp`):** Build [Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp) and test our add-only DP4A ternary GEMM kernels, 64-bit uint2 gather transfers, and memory footprint using mini/synthetic `.rada` containers.
-> 6. **Inspect the Cloud TPU Autopilot:** Review our autonomous pre-training harness in [`src/train_autopilot.py`](src/train_autopilot.py) and [`scripts/launch_autopilot.sh`](scripts/launch_autopilot.sh).
->
-> #### 🎯 What Happens Once Pre-Training Finishes:
-> - Converged checkpoints will be exported to standard Hugging Face `safetensors` and converted into single-file 64-byte aligned `.rada` containers for edge deployment.
-> - Final weights will be uploaded directly to Hugging Face ([`YSamchuk/Hetman-2b`](https://huggingface.co/YSamchuk/Hetman-2b)) under the Apache 2.0 license.
-> - Full evaluation harness logs across standard reasoning (MMLU, GSM8K, HumanEval), long-context retrieval (Needle-In-A-Haystack up to 256k tokens), and sovereign benchmarks (UA-MMLU) will be published openly.
 
 ---
 
@@ -200,3 +175,14 @@ Trained models are designed to be deployed directly with **[Rada.cpp](https://gi
 ## 📜 License & Open Source Charter
 
 Hetman-2.0B is proudly released under the permissive **Apache License 2.0**. All architectural designs, model code, training recipes, tokenizers, and companion runtime kernels are free to use, modify, and distribute for both research and commercial applications.
+
+---
+
+## 💬 Author's Note & Current Status
+
+Please note that the Hetman-2.0B architecture, tokenizer, and runtime code are fully developed and verified, but the final model weights are not yet trained. I am currently applying for and awaiting compute grants to fund the full 855-billion-token pre-training run on Cloud TPU v5e-128 pods. As soon as compute is secured and training completes, all checkpoints and single-file `.rada` containers will be published directly to this repository under Apache 2.0.
+
+### 🔗 Repositories & Resources
+* **Hetman-2.0B GitHub:** [github.com/YaroslavSamchuk/Hetman-2b](https://github.com/YaroslavSamchuk/Hetman-2b)
+* **Rada.cpp GitHub:** [github.com/YaroslavSamchuk/Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)
+* **Hugging Face Model Hub:** [huggingface.co/YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)

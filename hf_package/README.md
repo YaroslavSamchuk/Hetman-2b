@@ -22,37 +22,11 @@ widget:
 ---
 
 # Hetman-2.0B: Architecture & Production Tokenizer
-### 2.14B Total Parameters (~1.603B Active) | BitNet b1.58 Ternary | 16.78M Hopfield Slots | 256k Context | Cloud TPU v5e-128
+### 2.14B Total Parameters (~1.603B Active) | BitNet b1.58 Ternary | 16.78M Hopfield Slots | 256k Context
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/Status-Pre--training_In_Progress-blue.svg)](#)
 [![GitHub](https://img.shields.io/badge/GitHub-Hetman--2b-black?logo=github)](https://github.com/YaroslavSamchuk/Hetman-2b)
 [![Inference Engine](https://img.shields.io/badge/Runtime-Rada.cpp-orange)](https://github.com/YaroslavSamchuk/Rada.cpp)
-[![Pretrain-Platform](https://img.shields.io/badge/Pretraining-Cloud_TPU_v5e--128-orange.svg)](#)
-[![Target Hardware](https://img.shields.io/badge/Target_Edge-NVIDIA_RTX_2060+_>=6GB-green.svg)](#)
-[![Context Window](https://img.shields.io/badge/Context-262k_Tokens-purple.svg)](#)
-
----
-
-> [!IMPORTANT]
-> ### 🚧 Open-Source Architecture & Tokenizer Release — Pre-Training In Progress
->
-> **Welcome to Hetman-2.0B! Please note: model weights are NOT yet trained.**
->
-> We are building Hetman-2.0B entirely in the open. This Hugging Face repository currently hosts the **production-ready 65,536-token BPE tokenizer** and the **complete PyTorch architecture implementation (`trust_remote_code=True`)**.
->
-> **Pre-training on 855 billion tokens** across Cloud TPU v5e-128 pod slices is currently scheduled and in active preparation. The final pre-trained weights (`model.safetensors` and `.rada` single-file containers) will be published directly to this repository as soon as training converges.
->
-> #### 🛠️ What You Can Do Right Now:
-> 1. **Use the Production 65k Tokenizer:** Load it directly via `AutoTokenizer.from_pretrained("YSamchuk/Hetman-2b")`. It is fully trained, provides excellent Ukrainian fertility ($\le 1.18$ tokens/word), and normalizes Cyrillic apostrophe variants (`ʼ`, `'`, `’`).
-> 2. **Instantiate & Inspect the Full 2.14B Architecture:** Load the model graph with `trust_remote_code=True` to inspect layer configurations, verify parameter counts, test memory footprints, or experiment with custom training.
-> 3. **Run Fast Local Sanity Checks (< 5s):** Clone the [GitHub repository](https://github.com/YaroslavSamchuk/Hetman-2b) and run `python src/test_verification.py` to verify BitLinear ternarization, FWHT rotations, DeltaNet recurrence, and QK-Norm bounds on your CPU.
-> 4. **Benchmark with Rada.cpp:** Compile our companion C++20 / CUDA runtime [Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp) to test add-only DP4A integer GEMM execution and 256k context handling on consumer GPUs.
->
-> #### 🎯 What to Expect Once Pre-Training Finishes:
-> - Full pre-trained weights (`model.safetensors`) will be uploaded directly to this repository.
-> - Pre-packaged `.rada` binaries will be released for instant, zero-dependency offline inference in `Rada.cpp`.
-> - Official benchmark results (MMLU, GSM8K, HumanEval, Needle-In-A-Haystack up to 256k tokens, UA-MMLU) will be posted with reproducible logs.
 
 ---
 
@@ -179,3 +153,14 @@ This project is released under the permissive **Apache License 2.0**.
   url = {https://github.com/YaroslavSamchuk/Hetman-2b}
 }
 ```
+
+---
+
+## 💬 Author's Note & Current Status
+
+Please note that the Hetman-2.0B architecture, tokenizer, and runtime code are fully developed and verified, but the final model weights are not yet trained. I am currently applying for and awaiting compute grants to fund the full 855-billion-token pre-training run on Cloud TPU v5e-128 pods. As soon as compute is secured and training completes, all checkpoints and single-file `.rada` containers will be published directly to this repository under Apache 2.0.
+
+### 🔗 Repositories & Resources
+* **Hetman-2.0B GitHub:** [github.com/YaroslavSamchuk/Hetman-2b](https://github.com/YaroslavSamchuk/Hetman-2b)
+* **Rada.cpp GitHub:** [github.com/YaroslavSamchuk/Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)
+* **Hugging Face Model Hub:** [huggingface.co/YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)
