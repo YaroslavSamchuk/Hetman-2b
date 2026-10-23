@@ -27,7 +27,7 @@ widget:
 [![GitHub](https://img.shields.io/badge/GitHub-Hetman--2b-black?logo=github)](https://github.com/YaroslavSamchuk/Hetman-2b)
 [![Inference Engine](https://img.shields.io/badge/Runtime-Rada.cpp-orange)](https://github.com/YaroslavSamchuk/Rada.cpp)
 
-**Hetman-2.0B** is an edge-native, sovereign foundation model engineered for high-efficiency reasoning, extreme context handling, and low-bit compute. Developed from first principles for consumer hardware accessibility, Hetman combines 1.58-bit ternary quantization, linear recurrent attention, and sparse associative memory to deliver 256,000-token context processing within consumer GPU memory budgets.
+**Hetman-2.0B** is an edge-native foundation model engineered for high-efficiency reasoning, extreme context handling, and low-bit compute. Developed from first principles for consumer hardware accessibility, Hetman combines 1.58-bit ternary quantization, linear recurrent attention, and sparse associative memory to deliver 256,000-token context processing within consumer GPU memory budgets.
 
 ---
 
@@ -99,7 +99,7 @@ This project is licensed under the permissive **Apache License 2.0**.
 ```bibtex
 @software{samchuk2026hetman,
   author = {Samchuk, Yaroslav},
-  title = {Hetman-2.0B: High-Efficiency Edge-Native Sovereign Foundation Model},
+  title = {Hetman-2.0B: High-Efficiency Edge-Native Foundation Model},
   year = {2026},
   publisher = {Hugging Face / GitHub},
   url = {https://github.com/YaroslavSamchuk/Hetman-2b}
