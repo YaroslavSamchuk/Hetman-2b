@@ -3,13 +3,13 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub](https://img.shields.io/badge/GitHub-Hetman--2b-black?logo=github)](https://github.com/YaroslavSamchuk/Hetman-2b)
 [![Inference Runtime](https://img.shields.io/badge/Runtime-Rada.cpp-orange)](https://github.com/YaroslavSamchuk/Rada.cpp)
-[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-YSamchuk%2FHetman--2b-yellow)](https://huggingface.co/YSamchuk/Hetman-2b)
+[![Hugging Face](https://img.shields.io/badge/Hugging_Face-YSamchuk%2FHetman--2b-yellow)](https://huggingface.co/YSamchuk/Hetman-2b)
 
 **Hetman-2.0B** is an edge-native, sovereign foundation model engineered for high-efficiency reasoning, extreme context handling, and low-bit compute. Developed from first principles for consumer hardware accessibility, Hetman combines 1.58-bit ternary quantization, linear recurrent attention, and sparse associative memory to deliver 256,000-token context processing within consumer GPU memory budgets.
 
 ---
 
-## 📖 Architectural Philosophy: Why Hetman-2.0B?
+## Architectural Philosophy: Why Hetman-2.0B?
 
 In contemporary AI research, scaling models to long contexts (128k–256k tokens) has historically required massive server clusters. Traditional transformer architectures rely on quadratic Softmax attention ($O(N^2)$), causing the key-value cache (KV-cache) to balloon past 16–24 GB of VRAM. This effectively locks out independent developers, researchers, and everyday users who operate on consumer hardware.
 
@@ -24,7 +24,7 @@ The overarching design objective is to enable **deep, long-context reasoning loc
 
 ---
 
-## ⚡ Core Technologies & Innovations
+## Core Technologies & Innovations
 
 ### 1. 1.58-Bit Ternary Quantization (BitNet b1.58 + FWHT)
 Linear projection weights are strictly constrained to $\{-1, 0, +1\}$. Multiplications are replaced by single-cycle DP4A integer addition/subtraction inside GPU registers. To prevent activation outliers and preserve signal variance, activations pass through online orthogonal **Fast Walsh-Hadamard Transforms (FWHT, $B=512$)**, bounding quantization loss to $< 1.8\%$ compared to full FP32 baselines.
@@ -45,7 +45,7 @@ The model utilizes a custom 65,536-token Byte-Level BPE tokenizer with determini
 
 ---
 
-## 🏛️ Model Specifications
+## Model Specifications
 
 | Parameter | Value | Hardware Alignment Rationale |
 | :--- | :--- | :--- |
@@ -62,7 +62,7 @@ The model utilizes a custom 65,536-token Byte-Level BPE tokenizer with determini
 
 ---
 
-## 🛠️ Verification & Development Toolkit
+## Verification & Development Toolkit
 
 You can verify the mathematical consistency, parameter shapes, and numerical stability of Hetman-2.0B on any standard laptop CPU today.
 
@@ -99,7 +99,7 @@ python src/train_autopilot.py --dry_run --max_steps 20
 
 ---
 
-## 📌 Development Status & Pre-Training Roadmap
+## Development Status & Pre-Training Roadmap
 
 Hetman-2.0B is an independent, open-source research initiative developed from the ground up for community access.
 
@@ -109,7 +109,7 @@ As soon as compute resources are secured and pre-training completes, all product
 
 ---
 
-## 🚀 Native Edge Inference Runtime: `Rada.cpp`
+## Native Edge Inference Runtime: Rada.cpp
 
 Trained models are designed to be deployed directly with **[Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)**, our pure C++20 / CUDA inference engine built for consumer GPUs (RTX 2060 6GB+, RTX 3060, RTX 4060, Apple Silicon):
 
@@ -121,7 +121,7 @@ Trained models are designed to be deployed directly with **[Rada.cpp](https://gi
 
 ---
 
-## 📜 License & Citation
+## License & Citation
 
 Hetman-2.0B is proudly released under the permissive **Apache License 2.0**.
 
@@ -135,7 +135,7 @@ Hetman-2.0B is proudly released under the permissive **Apache License 2.0**.
 }
 ```
 
-### 🔗 Repositories & Resources
+### Repositories & Resources
 * **Hetman-2.0B GitHub:** [github.com/YaroslavSamchuk/Hetman-2b](https://github.com/YaroslavSamchuk/Hetman-2b)
 * **Rada.cpp GitHub:** [github.com/YaroslavSamchuk/Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)
 * **Hugging Face Model Hub:** [huggingface.co/YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)

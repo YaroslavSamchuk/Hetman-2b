@@ -31,7 +31,7 @@ widget:
 
 ---
 
-## 📖 Introduction
+## Introduction
 
 In conventional autoregressive language models, expanding context windows and scaling parameters to preserve factual recall inevitably incurs an unsustainable hardware penalty. At 128k–256k tokens, the KV-cache of standard transformers expands to tens of gigabytes of VRAM, pricing independent developers, researchers, and edge devices out of frontier AI.
 
@@ -44,7 +44,7 @@ The result is a model designed to run a complete **256,000-token context window 
 
 ---
 
-## ⚡ Key Architectural Innovations
+## Key Architectural Innovations
 
 ### 1. 1.58-Bit Ternary Weights (BitNet b1.58 + FWHT)
 Hetman-2.0B constrains linear projection weights strictly to ternary values $\{-1, 0, +1\}$. This replaces standard floating-point GEMM operations with lightweight integer addition and subtraction inside GPU registers. To prevent activation outliers and preserve signal variance across deep layers, activations pass through online orthogonal **Fast Walsh-Hadamard Transforms (FWHT, $B=512$)**, bounding quantization loss to $< 1.8\%$ compared to full FP32 baselines.
@@ -65,7 +65,7 @@ The model utilizes a custom 65,536-token Byte-Level BPE tokenizer with determini
 
 ---
 
-## 🏛️ Model Architecture Specifications
+## Model Architecture Specifications
 
 | Parameter | Value | Hardware Alignment Rationale |
 | :--- | :--- | :--- |
@@ -82,67 +82,7 @@ The model utilizes a custom 65,536-token Byte-Level BPE tokenizer with determini
 
 ---
 
-## 🚀 Quickstart: Exploring the Model Today
-
-### 1. Testing the Production Tokenizer
-The official 65k Byte-Level BPE tokenizer is fully trained and ready for immediate use:
-
-```python
-from transformers import AutoTokenizer
-
-# Load the official tokenizer directly from Hugging Face
-tokenizer = AutoTokenizer.from_pretrained("YSamchuk/Hetman-2b")
-
-# Test tokenization and Ukrainian / English fertility
-sample_text = "Hetman-2.0B — це відкрита суверенна модель із контекстом 256k токенів."
-tokens = tokenizer.tokenize(sample_text)
-token_ids = tokenizer.encode(sample_text)
-
-print(f"Token count: {len(tokens)}")
-print(f"Sample tokens: {tokens[:10]}")
-print(f"Fertility: {len(tokens) / len(sample_text.split()):.2f} tokens/word")
-```
-
-### 2. Instantiating the Architecture (`trust_remote_code=True`)
-You can inspect layer dimensions, verify parameter allocations, and perform forward/backward passes with randomly initialized weights:
-
-```python
-import torch
-from transformers import AutoConfig, AutoModelForCausalLM
-
-# Load configuration and instantiate full 2.14B architecture
-config = AutoConfig.from_pretrained("YSamchuk/Hetman-2b", trust_remote_code=True)
-model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
-
-total_params = sum(p.numel() for p in model.parameters())
-print(f"Model Architecture:      {model.__class__.__name__}")
-print(f"Total Parameters:        {total_params:,} (~{total_params / 1e9:.3f}B)")
-print(f"Context Window:          {config.max_position_embeddings:,} tokens")
-
-# Quick forward pass with dummy inputs
-dummy_input = torch.randint(0, config.vocab_size, (1, 16))
-with torch.no_grad():
-    outputs = model(dummy_input)
-
-print(f"Logits shape:            {outputs.logits.shape}")
-```
-
-### 3. Native Edge Inference with `Rada.cpp`
-Hetman-2.0B is paired with **[Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)**, an ultra-fast, zero-dependency C++20 / CUDA runtime designed for consumer GPUs:
-
-```bash
-# Clone and build the runtime in ~15 seconds
-git clone https://github.com/YaroslavSamchuk/Rada.cpp.git
-cd Rada.cpp && mkdir build && cd build
-cmake .. -A x64 -DRADA_CUDA=ON && cmake --build . --config Release
-
-# Test interactive generation with the bundled sanity container
-./Release/rada_cli.exe -m ../models/hetman_mini.rada -p "Explain neural network quantization" -n 32
-```
-
----
-
-## 📌 Development Status & Pre-Training Roadmap
+## Development Status & Pre-Training Roadmap
 
 Hetman-2.0B is an independent, open-source research initiative developed from the ground up for community access.
 
@@ -152,7 +92,7 @@ As soon as compute resources are secured and pre-training completes, all product
 
 ---
 
-## 📜 License & Citation
+## License & Citation
 
 This project is licensed under the permissive **Apache License 2.0**.
 
@@ -166,7 +106,7 @@ This project is licensed under the permissive **Apache License 2.0**.
 }
 ```
 
-### 🔗 Repositories & Resources
+### Repositories & Resources
 * **Hetman-2.0B GitHub:** [github.com/YaroslavSamchuk/Hetman-2b](https://github.com/YaroslavSamchuk/Hetman-2b)
 * **Rada.cpp GitHub:** [github.com/YaroslavSamchuk/Rada.cpp](https://github.com/YaroslavSamchuk/Rada.cpp)
 * **Hugging Face Model Hub:** [huggingface.co/YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)

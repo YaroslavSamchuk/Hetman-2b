@@ -3,7 +3,7 @@
 
 ---
 
-## 🪖 Field Guide Philosophy: Why This Autopilot Exists
+## Field Guide Philosophy: Why This Autopilot Exists
 
 Anyone who has operated a distributed training cluster across 128 TPU accelerator chips over multiple weeks knows the harsh reality of large-scale deep learning: **hardware and cloud infrastructure fail when you least expect it**.
 
@@ -15,7 +15,7 @@ You execute **one command**, close your terminal, and walk away. The autopilot s
 
 ---
 
-## 🛡️ The 3 Golden Rules of Unattended TPU Ops
+## The 3 Golden Rules of Unattended TPU Ops
 
 1. **Rule #1: Never train in an interactive shell.**  
    Network drops, laptop sleeps, and SSH timeouts will send `SIGHUP` and kill your process. Always launch via `bash scripts/launch_autopilot.sh`, which wraps execution inside a resilient, detached `tmux` session managed by an independent watchdog.
@@ -26,7 +26,7 @@ You execute **one command**, close your terminal, and walk away. The autopilot s
 
 ---
 
-## ⚡ Quickstart: Launching in 60 Seconds
+## Quickstart: Launching in 60 Seconds
 
 Once your Cloud TPU v5e-128 Pod Slice is provisioned:
 
@@ -50,7 +50,7 @@ You can safely disconnect your SSH session or shut down your local machine immed
 
 ---
 
-## ⚙️ Under The Hood: The Watchdog & Recovery Loop
+## Under The Hood: The Watchdog & Recovery Loop
 
 When `launch_autopilot.sh` executes, it builds and spawns `.watchdog_runner.sh` inside an isolated `tmux` environment. Here is how it guarantees multi-week survival:
 
@@ -60,7 +60,7 @@ flowchart TD
     B --> C["Spawn Detached tmux: 'hetman-training'"]
     C --> D["Watchdog Supervisor Starts Training Engine"]
     D --> E{"Process Exit Code?"}
-    E -- "Code 0 (Success)" --> F["🎉 Pre-Training & RL Complete!"]
+    E -- "Code 0 (Success)" --> F["Pre-Training & RL Complete"]
     F --> G["Phase 5: Auto-Export to .rada Container"]
     E -- "Non-Zero (Crash / Preemption)" --> H["Increment Crash Counter"]
     H --> I{"Crash Count >= 10?"}
@@ -79,7 +79,7 @@ flowchart TD
 
 ---
 
-## 🗓️ The 5-Phase Curriculum Schedule (855 Billion Tokens, ~16.2 Days)
+## The 5-Phase Curriculum Schedule (855 Billion Tokens, ~16.2 Days)
 
 The autopilot automatically advances through all training phases without manual intervention:
 
@@ -93,7 +93,7 @@ The autopilot automatically advances through all training phases without manual 
 
 ---
 
-## 📡 Real-Time Telemetry & Monitoring
+## Real-Time Telemetry & Monitoring
 
 You do not need to attach to the live console to know what the cluster is doing. The autopilot maintains multiple non-intrusive monitoring streams:
 
@@ -127,21 +127,21 @@ tail -f logs/training.log
 
 ### 3. Remote Webhook Alerts (Discord / Telegram / Slack)
 If `WEBHOOK_URL` was exported prior to launch, the autopilot dispatches instant notifications for:
-* 🚀 **Cluster Launch:** Initialized on TPU v5e-128 with device topology confirmation.
-* 🔄 **Phase Transitions:** Advancing from Phase 1 to Phase 2 (YaRN expansion), etc.
-* ⚠️ **Preemption Recovery:** Automatic lock clean-up and checkpoint reload alerts.
-* 🎉 **Training Complete:** Final validation loss and confirmation of `.rada` export.
+* **Cluster Launch:** Initialized on TPU v5e-128 with device topology confirmation.
+* **Phase Transitions:** Advancing from Phase 1 to Phase 2 (YaRN expansion), etc.
+* **Preemption Recovery:** Automatic lock clean-up and checkpoint reload alerts.
+* **Training Complete:** Final validation loss and confirmation of `.rada` export.
 
 ---
 
-## 🧰 Command Field Reference
+## Command Field Reference
 
 | Task | Command | Operational Notes |
 | :--- | :--- | :--- |
 | **Launch Autopilot** | `bash scripts/launch_autopilot.sh` | Idempotent. If already running, informs you without duplicating. |
 | **Check Live Status** | `bash scripts/status.sh` | Formatted ASCII dashboard showing progress, loss, throughput, ETA. |
 | **Read Raw Status** | `cat logs/STATUS.txt` | Single-shot plain text status view. |
-| **Attach to Console** | `tmux attach -t hetman-training` | **Caution:** Disconnect safely using `Ctrl+B`, then `D`. |
+| **Attach to Console** | `tmux attach -t hetman-training` | Disconnect safely using `Ctrl+B`, then `D`. |
 | **Stream System Logs** | `tail -f logs/training.log` | Streams stdout/stderr from JAX/Flax training loops. |
 | **Graceful Shutdown** | `bash scripts/stop_training.sh` | Sends `SIGINT`, waits up to 60s for checkpoint save, exits cleanly. |
 
@@ -151,7 +151,7 @@ If `WEBHOOK_URL` was exported prior to launch, the autopilot dispatches instant 
 
 ---
 
-## 🚨 Field Triage & Emergency Troubleshooting
+## Field Triage & Emergency Troubleshooting
 
 ### Triage 1: Host Machine Rebooted or Cloud TPU VM Restarted
 If the cloud provider performed scheduled maintenance and rebooted the host VM:
@@ -180,7 +180,7 @@ python3 -c "import jax; print('Visible TPU Cores:', len(jax.devices())); assert 
 
 ---
 
-## 🏁 Final Deliverable & Transition to Edge Inference
+## Final Deliverable & Transition to Edge Inference
 
 When Phase 4 completes, the autopilot triggers Phase 5 (`export_to_rada.py`). It:
 1. Dequantizes FP32 master weights into exact $\{-1, 0, +1\}$ ternary trits.
@@ -191,12 +191,12 @@ When Phase 4 completes, the autopilot triggers Phase 5 (`export_to_rada.py`). It
 You will see the completion banner in `logs/TRAINING_COMPLETED.md`:
 ```text
 ================================================================================
- [✓] ALL TRAINING PHASES COMPLETED SUCCESSFULLY! 
+ [OK] ALL TRAINING PHASES COMPLETED SUCCESSFULLY! 
 ================================================================================
 [*] Phase 5: Automatically Exporting Trained Model to .rada Binary Container...
-[✓] Successfully exported 897 tensors to ../rada.cpp/models/hetman-2.0b-ternary.rada
+[OK] Successfully exported 897 tensors to ../rada.cpp/models/hetman-2.0b-ternary.rada
     Embedded Tokenizer: Present (65,536 vocab)
-[🎉] Complete! Ready-to-use model produced at: ../rada.cpp/models/hetman-2.0b-ternary.rada
+[Complete] Ready-to-use model produced at: ../rada.cpp/models/hetman-2.0b-ternary.rada
 ```
 
 ### Immediate Local Deployment:
