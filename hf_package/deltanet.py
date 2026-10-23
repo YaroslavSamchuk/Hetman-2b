@@ -53,6 +53,8 @@ class GatedDeltaNet(nn.Module):
             alpha_init = torch.tensor([1.0] * n_fast + [3.5] * n_episodic + [6.9] * n_anchor, dtype=torch.float32)
             self.alpha_proj.bias.copy_(alpha_init)
             nn.init.constant_(self.beta_proj.bias, -1.0)
+            nn.init.zeros_(self.alpha_proj.weight)
+            nn.init.zeros_(self.beta_proj.weight)
 
     def forward(
         self,
@@ -67,7 +69,7 @@ class GatedDeltaNet(nn.Module):
             S: [B, num_heads, head_dim, head_dim]
         Returns:
             out: [B, L, hidden_size]
-            next_state: Tuple[conv_state, S] (O(1) memory: ~128 KB per layer)
+            next_state: Tuple[conv_state, S] (O(1) memory: 256 KB per layer in FP32)
         """
         B, L, D = x.shape
         
@@ -82,21 +84,56 @@ class GatedDeltaNet(nn.Module):
                 
         # 1. Causal 1D Convolution over input tokens
         k_sz = self.conv_kernel
-        if L == 1 and conv_state is not None:
-            # Incremental single-token decoding
-            # conv_state: [B, D, k-1], x_step: [B, D, 1]
-            x_in = torch.cat([conv_state, x.transpose(1, 2)], dim=-1)  # [B, D, k]
-            next_conv_state = x_in[:, :, 1:].detach()
-            x_conv = F.silu(self.conv1d(x_in)).transpose(1, 2)         # [B, 1, D]
+        if L == 1:
+            if conv_state is not None:
+                if state_reset_mask is not None:
+                    # Reset causal conv_state if current token marks a document boundary
+                    conv_state = conv_state * state_reset_mask[:, 0].view(B, 1, 1).to(conv_state.dtype)
+                # Incremental single-token decoding
+                # conv_state: [B, D, k-1], x_step: [B, D, 1]
+                x_in = torch.cat([conv_state, x.transpose(1, 2)], dim=-1)  # [B, D, k]
+                next_conv_state = x_in[:, :, 1:].detach()
+                x_conv = F.silu(self.conv1d(x_in)).transpose(1, 2)         # [B, 1, D]
+            else:
+                x_in = F.pad(x.transpose(1, 2), (k_sz - 1, 0))
+                next_conv_state = x_in[:, :, 1:].detach()
+                x_conv = F.silu(self.conv1d(x_in)).transpose(1, 2)
         else:
             # Sequence prefill or batch training
             x_trans = x.transpose(1, 2)  # [B, D, L]
             if conv_state is not None:
+                if state_reset_mask is not None:
+                    conv_state = conv_state * state_reset_mask[:, 0].view(B, 1, 1).to(conv_state.dtype)
                 x_padded = torch.cat([conv_state, x_trans], dim=-1)
             else:
                 x_padded = F.pad(x_trans, (k_sz - 1, 0))
             next_conv_state = x_padded[:, :, -(k_sz - 1):].detach() if k_sz > 1 else torch.empty(0, device=x.device)
-            x_conv = F.silu(self.conv1d(x_padded)).transpose(1, 2)     # [B, L, D]
+            
+            if state_reset_mask is not None and k_sz == 4:
+                # Mask out prior-document history taps across document boundaries
+                r = state_reset_mask.to(x.dtype)
+                m1 = r.unsqueeze(1)  # [B, 1, L] for tap t-1
+                m2 = m1 * F.pad(r[:, :-1], (1, 0), value=1.0).unsqueeze(1)  # for tap t-2
+                m3 = m2 * F.pad(r[:, :-2], (2, 0), value=1.0).unsqueeze(1)  # for tap t-3
+                
+                tap0 = x_padded[:, :, 0:L] * m3  # t-3
+                tap1 = x_padded[:, :, 1:L+1] * m2  # t-2
+                tap2 = x_padded[:, :, 2:L+2] * m1  # t-1
+                tap3 = x_padded[:, :, 3:L+3]       # t (current)
+                
+                w = self.conv1d.weight  # [D, 1, 4]
+                b = self.conv1d.bias    # [D]
+                conv_linear = (
+                    tap0 * w[:, 0, 0].view(1, D, 1) +
+                    tap1 * w[:, 0, 1].view(1, D, 1) +
+                    tap2 * w[:, 0, 2].view(1, D, 1) +
+                    tap3 * w[:, 0, 3].view(1, D, 1)
+                )
+                if b is not None:
+                    conv_linear = conv_linear + b.view(1, D, 1)
+                x_conv = F.silu(conv_linear).transpose(1, 2)  # [B, L, D]
+            else:
+                x_conv = F.silu(self.conv1d(x_padded)).transpose(1, 2)     # [B, L, D]
             
         x_eff = x + x_conv
         

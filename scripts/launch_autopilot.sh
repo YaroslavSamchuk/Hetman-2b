@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# HETMAN-2.0B: Google Cloud TPU Research Cloud (TRC) Master Autopilot Launcher
+# HETMAN-2.0B: Cloud TPU v5e-128 Master Autopilot Launcher
 # ==============================================================================
 # Run this script once on your TPU VM and leave it running for ~16 days.
 # When it finishes, you will find fully trained model weights and the optimized
@@ -36,7 +36,7 @@ cat << "EOF"
   | |_| |  _|   | | | |\/| | / _ \ |  \| | _____ __) | | | |  _ \ 
   |  _  | |___  | | | |  | |/ ___ \| |\  ||_____/ __/| |_| | |_) |
   |_| |_|_____| |_| |_|  |_/_/   \_\_| \_|     |_____|\___/|____/ 
-        AUTOPILOT TPU LAUNCHER (Google Cloud TPU v5e-128 Pod Slice)
+        AUTOPILOT TPU LAUNCHER (Cloud TPU v5e-128 Pod Slice)
 ================================================================================
 EOF
 echo -e "\033[0m"
@@ -56,11 +56,11 @@ fi
 
 # Verify JAX & TPU Driver installation
 python3 -c "import jax; print('[✓] JAX Detected. Hardware Devices:', len(jax.devices()))" 2>/dev/null || {
-    echo "[*] JAX with TPU support not found. Auto-installing Google Cloud TPU dependencies..."
+    echo "[*] JAX with TPU support not found. Auto-installing Cloud TPU dependencies..."
     pip install --upgrade pip
     pip install -U "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
     pip install flax optax orbax-checkpoint tokenizers torch numpy
-    echo "[✓] Google Cloud TPU dependencies successfully installed."
+    echo "[✓] Cloud TPU dependencies successfully installed."
 }
 
 # 2. Check for active training session
@@ -81,16 +81,29 @@ cd "${ROOT_DIR}"
 
 LOG_FILE="${ROOT_DIR}/logs/training.log"
 CRASH_COUNT=0
+MAX_CRASHES=10
 
 echo "[Watchdog] Initializing Autonomous Training Loop at $(date)..." >> "${LOG_FILE}"
+
+# Auto-detect whether to use JAX TPU engine or PyTorch Autopilot
+IS_TPU=false
+if python3 -c "import jax; devices = jax.devices(); exit(0 if any(d.platform == 'tpu' for d in devices) else 1)" 2>/dev/null; then
+    IS_TPU=true
+fi
 
 while true; do
     echo "----------------------------------------------------------------" >> "${LOG_FILE}"
     echo "[Watchdog] Starting/Resuming Hetman-2.0B at $(date)..." >> "${LOG_FILE}"
     echo "----------------------------------------------------------------" >> "${LOG_FILE}"
 
-    # Launch master autopilot orchestrator
-    python3 -u src/train_autopilot.py "$@" 2>&1 | tee -a "${LOG_FILE}"
+    # Launch master orchestrator (JAX TPU distributed scan if on TPU VM, else PyTorch Autopilot)
+    if [ "${IS_TPU}" = true ] || [[ "$*" == *"--engine jax"* ]]; then
+        echo "[Watchdog] Executing JAX/Flax TPU v5e Distributed Engine..." >> "${LOG_FILE}"
+        python3 -u src/train_tpu_jax.py "$@" 2>&1 | tee -a "${LOG_FILE}"
+    else
+        echo "[Watchdog] Executing PyTorch Autopilot Engine..." >> "${LOG_FILE}"
+        python3 -u src/train_autopilot.py "$@" 2>&1 | tee -a "${LOG_FILE}"
+    fi
     EXIT_CODE=${PIPESTATUS[0]}
 
     if [ ${EXIT_CODE} -eq 0 ]; then
@@ -100,13 +113,18 @@ while true; do
     else
         CRASH_COUNT=$((CRASH_COUNT + 1))
         echo -e "\n[⚠️] Process exited with error code ${EXIT_CODE} at $(date) (Event #${CRASH_COUNT})." >> "${LOG_FILE}"
-        echo "[*] Cloud preemption or XLA driver reset detected. Clearing locks..." >> "${LOG_FILE}"
+        if [ ${CRASH_COUNT} -ge ${MAX_CRASHES} ]; then
+            echo "[!] Maximum crash count (${MAX_CRASHES}) reached. Stopping to prevent loop." >> "${LOG_FILE}"
+            exit 1
+        fi
+        echo "[*] Cloud preemption or driver reset detected. Clearing locks..." >> "${LOG_FILE}"
         
         # Reset any dangling TPU lock files
         sudo rm -f /tmp/libtpu* /tmp/tpu* 2>/dev/null || true
         pkill -9 -f "train_autopilot.py" 2>/dev/null || true
+        pkill -9 -f "train_tpu_jax.py" 2>/dev/null || true
         
-        echo "[*] Waiting 30 seconds for TPU hardware reinitialization..." >> "${LOG_FILE}"
+        echo "[*] Waiting 30 seconds for hardware reinitialization..." >> "${LOG_FILE}"
         sleep 30
         echo "[*] Resuming automatically from latest saved checkpoint..." >> "${LOG_FILE}"
     fi

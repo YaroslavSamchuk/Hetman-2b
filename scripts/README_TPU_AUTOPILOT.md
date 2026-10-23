@@ -1,64 +1,64 @@
-# Інструкція: Автопілот навчання Hetman-2.0B на Google Cloud TPU v5e-128
+# Hetman-2.0B Autonomous Autopilot Guide: Cloud TPU v5e-128
 
-Ця система розроблена для **повністю автономного навчання протягом ~16 днів (пів місяця)** у межах гранту **Google Cloud TPU Research Cloud (TRC)**.
+This system is engineered for **fully autonomous, set-and-forget pre-training across ~16 days** on high-performance **Cloud TPU v5e-128** accelerator infrastructure.
 
-Вам потрібно виконати лише **одну команду** на TPU VM, після чого можна закрити термінал і повернутися через пів місяця — усі фази тренування завершаться автоматично, а готова модель буде зібрана й експортована в бінарний контейнер `.rada`.
+You execute **a single command** on the TPU VM, detach from the terminal, and return upon completion — all curriculum phases run automatically, and the final model is compiled into an optimized, single-file `.rada` binary container.
 
 ---
 
-## 1. Як запустити (Швидкий старт)
+## 1. Quickstart
 
-Після схвалення заявки TRC та створення Cloud TPU VM:
+Once compute is provisioned and your Cloud TPU VM is created:
 
 ```bash
-# 1. Підключіться до TPU VM через gcloud
-gcloud compute tpus tpu-vm ssh <tpu-vm-name> --zone=<tpu-zone>
+# 1. Connect to the TPU VM via SSH
+ssh <user>@<tpu-vm-ip> # or cloud CLI
 
-# 2. Перейдіть до папки проєкту
+# 2. Navigate to project root
 cd Hetman-2b
 
-# 3. Запустіть автопілот однією командою
+# 3. Launch the autonomous autopilot in the background
 bash scripts/launch_autopilot.sh
 ```
 
-**Все!** Після цього скрипт:
-1. Автоматично перевірить апаратне забезпечення (128 ядер TPU v5e).
-2. За потреби встановить останні драйвери `jax[tpu]`, `flax`, `optax`, `orbax-checkpoint`.
-3. Створить захищену сесію `tmux` (`hetman-training`) з фоновим сторожовим таймером (Watchdog).
-4. Розпочне повний 4-фазний цикл навчання.
+**That's it!** The launcher will:
+1. Automatically inspect TPU hardware (128 v5e accelerator cores).
+2. Install/verify `jax[tpu]`, `flax`, `optax`, `orbax-checkpoint` if needed.
+3. Spawn a resilient `tmux` session (`hetman-training`) managed by an autonomous watchdog.
+4. Execute the complete 4-phase curriculum.
 
-> **💡 Можна закривати термінал (SSH):** Навчання виконується у фоновій сесії `tmux`, тому ви можете спокійно розірвати SSH-з'єднання або вимкнути свій домашній комп'ютер.
+> **💡 Safe Terminal Detachment:** Training runs detached inside `tmux`. You can safely close your SSH connection or power off your local workstation.
 
 ---
 
-## 2. Як відстежувати прогрес під час навчання
+## 2. Monitoring Progress
 
-Коли захочете перевірити стан, підключіться до TPU VM і виконайте будь-яку з команд:
+To monitor progress at any time, connect to the TPU VM and run:
 
 ```bash
-# 1. Швидкий текстовий дашборд (показує поточну фазу, крок, токени, loss та ETA)
+# 1. Terminal dashboard (current phase, step, tokens, loss, ETA)
 bash scripts/status.sh
 
-# 2. Або переглянути живий файл статусу
+# 2. Or view live status log
 cat logs/STATUS.txt
 
-# 3. Підключитися до живого візуального терміналу тренування
+# 3. Attach to live training terminal
 tmux attach -t hetman-training
-# (Щоб відключитися назад без зупинки: натисніть Ctrl+B, потім D)
+# (To detach without stopping: press Ctrl+B, then D)
 
-# 4. Переглянути останні рядки логу
+# 4. Stream recent logs
 tail -f logs/training.log
 ```
 
 ---
 
-## 3. Налаштування сповіщень на телефон (Telegram / Discord / Slack)
+## 3. Remote Notifications (Telegram / Discord / Slack)
 
-Якщо ви хочете отримувати повідомлення про старт, завершення кожної фази та фінал навчання на телефон:
+To receive real-time notifications on launch, phase transitions, and final completion:
 ```bash
-# Перед запуском вкажіть ваш Webhook URL:
+# Set your Webhook URL before launching:
 export WEBHOOK_URL="https://discord.com/api/webhooks/..."
-# Або для Telegram бота:
+# Or for Telegram bot:
 # export WEBHOOK_URL="https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text="
 
 bash scripts/launch_autopilot.sh
@@ -66,50 +66,48 @@ bash scripts/launch_autopilot.sh
 
 ---
 
-## 4. Що відбувається протягом ~16 днів (Розклад навчання)
+## 4. Multi-Phase Curriculum Schedule (~16.5 Days)
 
-| Фаза | Тривалість | Обсяг даних | Опис |
+| Phase | Duration | Token Volume | Description |
 | :--- | :--- | :--- | :--- |
-| **Фаза 1: 4k Pre-training** | ~14.2 дня | 820 млрд токенів | Базове навчання зв'язної мови, логіки, коду й фактів (WSD розклад, піковий LR `0.0018`). |
-| **Фаза 2: 256k Long-Context** | ~1.9 дня | 30 млрд токенів | Розширення контекстного вікна до 262,144 токенів через YaRN RoPE (коефіцієнт $s=64$). |
-| **Фаза 3: Chat & Reasoning SFT** | ~0.35 дня | 5 млрд токенів | ChatML вирівнювання, ланцюжки міркувань `<think>...</think>`, обрізка історичних думок. |
-| **Фаза 4: RL Alignment** | ~4 години | 500 кроків | Пост-тренування за алгоритмом Sum-Preserving GAR та верифікатором AST (GAGAR v2). |
-| **Фаза 5: Auto-Export** | ~2 хвилини | Автоматично | Конвертація ваг у 2-бітний тернарний бінарний контейнер `hetman-2.0b-ternary.rada`. |
+| **Phase 1: 4k Pre-training** | ~14.2 days | 820 Billion tokens | Core language, factual knowledge, logic, and code (WSD schedule, peak LR `0.0018`). |
+| **Phase 2: 256k Long-Context** | ~1.9 days | 30 Billion tokens | Context window expansion to 262,144 tokens via YaRN RoPE (scale factor $s=64$). |
+| **Phase 3: Chat & Reasoning SFT** | ~0.35 days | 5 Billion tokens | ChatML alignment, multi-turn reasoning chains `<think>...</think>`, thought pruning. |
+| **Phase 4: RL Alignment** | ~4 hours | 500 steps | Post-training alignment via Sum-Preserving GAR and in-process AST verifier. |
+| **Phase 5: Auto-Export** | ~2 minutes | Automatic | Weight conversion into packed 2-bit ternary binary container `hetman-2.0b-ternary.rada`. |
 
 ---
 
-## 5. Захист від форс-мажорів (Preemptions & Reboot Watchdog)
+## 5. Fault Tolerance (Preemptions & Reboot Watchdog)
 
-TPU в межах дослідницьких грантів (TRC) іноді можуть тимчасово перезавантажуватися через планове обслуговування хмари.
-- **Вбудований Watchdog** постійно перевіряє стан процесу.
-- Якщо віртуальна машина перезавантажиться або драйвер видасть збій:
-  1. Watchdog очистить заблоковані файли `/tmp/libtpu*`.
-  2. Зачекає 30 секунд.
-  3. **Автоматично відновить тренування з останнього збереженого чекпойнта**.
-- **Ротація чекпойнтів:** Автопілот автоматично зберігає чекпойнт кожні 1,000 кроків і видаляє старі (залишає лише топ-3 свіжіших + найкращий за loss), що захищає диск від переповнення.
+Cloud accelerator instances can experience transient preemption or host maintenance.
+- **Integrated Watchdog:** Continuously tracks process health.
+- If a VM reboots or driver glitches occur:
+  1. Cleans locked `/tmp/libtpu*` sockets.
+  2. Waits 30 seconds for network stabilization.
+  3. **Automatically resumes training from the latest valid checkpoint**.
+- **Checkpoint Rotation:** Automatically saves checkpoints and preserves top-3 recent checkpoints plus the best loss checkpoint to protect disk space.
 
 ---
 
-## 6. Що ви побачите, коли повернетесь через пів місяця
+## 6. Output Deliverables
 
-У папці проєкту з'явиться підсумковий звіт `logs/TRAINING_COMPLETED.md`:
+Upon completion, `logs/TRAINING_COMPLETED.md` is generated:
 ```text
 ================================================================================
  [✓] ALL TRAINING PHASES COMPLETED SUCCESSFULLY! 
 ================================================================================
 [*] Phase 5: Automatically Exporting Trained Model to .rada Binary Container...
-[✓] Successfully exported 896 tensors to ../rada.cpp/models/hetman-2.0b-ternary.rada (829 MB)
+[✓] Successfully exported 897 tensors to ../rada.cpp/models/hetman-2.0b-ternary.rada
     Embedded Tokenizer: Present (65,536 vocab)
-    SHA-256 Checksum: c8f2b7...
-
 [🎉] Complete! Ready-to-use model produced at: ../rada.cpp/models/hetman-2.0b-ternary.rada
 ```
 
-### Запуск отриманої навченої моделі:
+### Running the Trained Model:
 ```bash
-# 1. Запуск у консольному чаті з високою швидкістю (>350 ток/с):
+# 1. High-throughput CLI inference (>350 tok/s):
 ./rada.cpp/build/Release/rada_cli -m rada.cpp/models/hetman-2.0b-ternary.rada
 
-# 2. Запуск локального веб-сервера з графічним інтерфейсом:
+# 2. Local browser web server UI:
 ./rada.cpp/build/Release/rada_web -m rada.cpp/models/hetman-2.0b-ternary.rada
 ```

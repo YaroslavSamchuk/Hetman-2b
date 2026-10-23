@@ -41,7 +41,7 @@ def pack_ternary_to_2bit(weights: torch.Tensor) -> Tuple[np.ndarray, float]:
 
     if weights.ndim == 2:
         N, K = weights.shape
-        w_ternary = torch.clamp(torch.round(weights / gamma), -1.0, 1.0).to(torch.int8).cpu().numpy()
+        w_ternary = torch.clamp(torch.round(weights.detach() / gamma), -1.0, 1.0).to(torch.int8).cpu().numpy()
         mapped = np.zeros_like(w_ternary, dtype=np.uint8)
         mapped[w_ternary == 1] = 1
         mapped[w_ternary == -1] = 2

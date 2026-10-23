@@ -14,11 +14,18 @@ if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
     echo "[*] Sending SIGINT to training process in tmux session '${SESSION_NAME}'..."
     tmux send-keys -t "${SESSION_NAME}" C-c
     
-    echo "[*] Waiting 10 seconds for emergency checkpoint saving to disk..."
-    sleep 10
+    echo "[*] Waiting gracefully for checkpoint saving to complete (up to 60s)..."
+    WAITED=0
+    while tmux has-session -t "${SESSION_NAME}" 2>/dev/null && [ ${WAITED} -lt 60 ]; do
+        sleep 2
+        WAITED=$((WAITED + 2))
+        echo "    ...waiting (${WAITED}s)"
+    done
     
-    echo "[*] Terminating tmux session '${SESSION_NAME}'..."
-    tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+    if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
+        echo "[*] Graceful wait period exceeded. Terminating tmux session '${SESSION_NAME}'..."
+        tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+    fi
     echo -e "\033[1;32m[✓] Training safely stopped. All checkpoints preserved.\033[0m"
     echo "    To resume training anytime: bash scripts/launch_autopilot.sh"
 else

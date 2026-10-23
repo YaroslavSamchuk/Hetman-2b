@@ -5,7 +5,7 @@
 **Document Identifier:** RFC-HETMAN-2.0B-PRODUCTION-OFFICIAL  
 **Authors:** Yaroslav Samchuk (Architect & Principal Investigator)  
 **Licensing & Distribution:** Apache License 2.0 (100% Free, Unencumbered Open Source)  
-**Target Pre-Training Infrastructure:** Google Cloud TPU v5e-128 Pod Slice (via TPU Research Cloud Allocation)  
+**Target Pre-Training Infrastructure:** Cloud TPU v5e-128 Pod Slice (High-Performance Cloud Accelerator Cluster)  
 **Primary Edge Deployment Target:** Consumer GPUs starting from **NVIDIA GeForce RTX 20-series (RTX 2060 6 GB+)**, RTX 30-series (RTX 3050 6GB, RTX 3060), RTX 40-series (RTX 4050 Mobile 6 GB, RTX 4060 Mobile 8 GB, Desktop), RTX 50-series, Apple Silicon Unified Memory, and AVX2/AVX-512 CPUs  
 **Dedicated Inference Runtime:** `Rada.cpp` (Autonomous C++20 / CUDA High-Performance Inference Engine)  
 **Nominal Parameter Capacity:** 2,137,522,176 Total Parameters (~2.138B Storage Capacity; ~1.603B Active Compute per Token via Top-32 Sparse Hopfield Memory)  
@@ -27,7 +27,7 @@ When scaled down to edge-deployable regimes (< 3B parameters), forcing continuou
 Hetman-2.0B resolves these trade-offs by enforcing a strict functional decomposition of declarative knowledge retrieval and procedural algorithmic execution across a 4-stage sequential Directed Acyclic Graph (DAG):
 1. **Deep Denoising Stem (8 Layers):** A robust contextual encoder that disambiguates multilingual polysemy, normalizes token noise, and extracts deep invariant syntactic representations using Gated DeltaNet recurrent memory interleaved with Global Softmax Attention.
 2. **Triad Concurrent Processing (Batched Single-Pass Execution):** The stem output is dispatched simultaneously across three parallel accelerator streams:
-   * **Speculative Latent-Hopfield Core (SLH-Core):** A 0.537B-parameter associative memory containing **16,777,216 discrete attractor slots** ($d_v = 32$, factored across 16 groups of $1024 \times 1024$, linearly expanded to 128 via $W_{\text{expand}} \in \mathbb{R}^{16 \times 32 \times 128}$), executing sub-linear fact retrieval via sparsified 2D bilinear contractions with speculative lookahead prefetching from the previous layer.
+   * **Speculative Latent-Hopfield Core (SLH-Core):** A 0.544B-parameter associative memory containing **8,388,608 discrete attractor slots** ($d_v = 64$, factored across 32 minigroups of $512 \times 512$), executing sub-linear fact retrieval via sparsified 2D bilinear contractions with speculative lookahead prefetching from the previous layer.
    * **Continuous Representation Backbone (8 SwiGLU Layers):** A high-capacity continuous representation engine dedicated to domain syntax and semantic structures.
    * **Hypothesis Extraction Subnetwork (6 Transformer Layers):** An initial deductive hypothesis generator extracting early causal trajectories directly from the contextual stem.
    * **Adaptive Dynamic Fusion Gate:** Integrates raw context with retrieved facts, domain representations, and early hypotheses via channel-wise projection.
@@ -52,7 +52,7 @@ Hetman-2.0B provides an encyclopedic knowledge capacity of **2,137,522,176 param
 | **Embeddings** | Vocabulary Token Table | 1 Table | 1536 | $V=65,536$ | **100,663,296** | BF16 (Tied to LM Head) | 100,663,296 |
 | **Stage 1: Denoising Stem** | Contextual Denoising & Parsing | 8 Layers | 1536 | $d_{\text{ffn}}=6144$ | **276,824,064** | 1.58-bit Ternary | 276,824,064 |
 | **Stage 2: Triad Processing** | | | | | | | |
-| ↳ **Branch A: Hopfield Core**| **Associative Memory (SLH)** | **1 Macro Block**| **16 Groups** | **$16 \times 1024 \times 1024 \times 32$**| **536,936,448** | **1.58-bit Ternary + FP16 Expand** | **~9,437,184 (Top-32)** |
+| ↳ **Branch A: Hopfield Core**| **Associative Memory (SLH-Core v2)** | **1 Macro Block**| **16 Groups** | **$16 \times 1024 \times 1024 \times 32 \to 128$**| **545,332,736** | **1.58-bit Ternary** | **~16,384 (Top-32)** |
 | ↳ **Branch B: Domain Expert**| Continuous Representation | 8 Layers | 1536 | $d_{\text{ffn}}=6144$ | **226,492,416** | 1.58-bit Ternary | 226,492,416 |
 | ↳ **Branch C: Early Logic** | Hypothesis Subnetwork | 6 Layers | 1536 | $d_{\text{ffn}}=6144$ | **207,618,048** | 1.58-bit Ternary | 207,618,048 |
 | ↳ **Fusion Gating Layer** | Triad Projection + Gate | 1 Layer | 1536 | $3 \times 1536$ | **9,437,184** | 1.58-bit Ternary | 9,437,184 |
@@ -95,26 +95,24 @@ The stem resolves syntactic ambiguity and long-range dependencies through an **I
 
 ### 3.2. Stage 2: Triad Concurrent Processing & Speculative Hopfield Memory
 
-#### Branch A: Speculative Latent-Hopfield Core (SLH-Core, 16.78M Slots)
+#### Branch A: Speculative Latent-Hopfield Core (SLH-Core, 8.39M Slots)
 1. **Speculative Lookahead Prefetching:**
    The router for the Hopfield Core is executed as a speculative draft projector at the output of Stem Layer 7. While Stem Layer 8 executes its dense compute, the GPU/TPU DMA controller issues asynchronous transfers (`cuda::memcpy_async` / Pallas tile prefetch) to load the Top-32 memory values directly into L2 cache / SRAM buffers, eliminating global DRAM stalls.
 2. **Sub-Query Decomposition & Spherical Manifold:**
    $$z = \text{RMSNorm}(\text{BitLinear}(X_{\text{stem}}, W_{\text{qh}})) \in \mathbb{R}^{B \times L \times 2048}$$
-   For each group $g \in \{1, \dots, 16\}$, $z$ splits into unit-normalized sub-queries $q_{g, 1}, q_{g, 2} \in \mathbb{S}^{63} \subset \mathbb{R}^{64}$ ($W_{\text{qh}} \in \mathbb{R}^{1536 \times 2048}$).
-3. **Dual Codebook Cosine Retrieval & Aux-Loss-Free PID Load Balancing:**
-   $$S_1^{(g)}[b, l, u] = q_{g, 1}[b, l] \cdot \hat{C}_1^{(g)}[u]^T + b_1^{(g)}[u], \quad S_2^{(g)}[b, l, v] = q_{g, 2}[b, l] \cdot \hat{C}_2^{(g)}[v]^T + b_2^{(g)}[v]$$
-   where $\hat{C}_1^{(g)}, \hat{C}_2^{(g)} \in \mathbb{R}^{1024 \times 64}$ are unit-normalized codebooks per group ($16 \times 1024 \times 1024 = 16,777,216$ discrete attractor slots Pod-wide). Dynamic router biases $b_1, b_2$ are updated via normalized symmetric PID load balancing, preventing slot starvation without auxiliary loss conflicts.
+   For each minigroup $g \in \{1, \dots, 32\}$, $z$ splits into unit-normalized sub-queries $q_{g, 1}, q_{g, 2} \in \mathbb{S}^{31} \subset \mathbb{R}^{32}$ ($W_{\text{qh}} \in \mathbb{R}^{1536 \times 2048}$).
+3. **Dual Codebook Cosine Retrieval:**
+   $$S_1^{(g)}[b, l, u] = q_{g, 1}[b, l] \cdot \hat{C}_1^{(g)}[u]^T, \quad S_2^{(g)}[b, l, v] = q_{g, 2}[b, l] \cdot \hat{C}_2^{(g)}[v]^T$$
+   where $\hat{C}_1^{(g)}, \hat{C}_2^{(g)} \in \mathbb{R}^{512 \times 32}$ are unit-normalized codebooks per minigroup ($32 \times 512 \times 512 = 8,388,608$ discrete attractor slots Pod-wide).
 4. **Top-$k$ Sparsification ($k_1=8, k_2=4 \implies K=32$):**
    Active slot indices: $\mathcal{K}_1 = \text{argtopk}(S_1^{(g)}, 8)$, $\mathcal{K}_2 = \text{argtopk}(S_2^{(g)}, 4)$.
-   Normalized weights: $\widetilde{A}_{ij}^{(g)} = \text{Softmax}(\beta \cdot (S_{1, \text{raw}}^{(g)}[i] + S_{2, \text{raw}}^{(g)}[j]))$ across the 32 active pairs ($\beta = 1/\sqrt{32} \approx 0.1768$).
-5. **Tile-Streamed Bilinear Contraction & Linear Expansion:**
-   Value tensor $V \in \{-1, 0, +1\}^{16 \times 1024 \times 1024 \times 32}$ ($536,870,912$ parameters total). 
-   * Packed 2-bit storage requires only **~105 MB VRAM** (128 MB packed).
-   * Vectorized 64-bit `uint2` memory transfers load 8 bytes per slot, cutting DRAM gather bandwidth by 75% to **4 KB per token**.
-   * Micro-fact accumulation followed by 128-dim linear projection:
-     $$m_{\text{dyn}}^{(g)}[b, l, d] = \sum_{(u, v) \in \mathcal{K}_1 \times \mathcal{K}_2} \widetilde{A}_{uv}^{(g)} \cdot V^{(g)}[u, v, d] \in \mathbb{R}^{32}$$
-     $$m^{(g)}[b, l, e] = \sum_{d=1}^{32} m_{\text{dyn}}^{(g)}[b, l, d] \cdot W_{\text{expand}}^{(g)}[d, e] + V_{\text{shared}}^{(g)}[e] \in \mathbb{R}^{128}$$
-6. **Knowledge Projection:** $Y_{\text{know}} = \text{BitLinear}([m^{(1)}, \dots, m^{(16)}], W_{\text{out\_hop}}) \in \mathbb{R}^{B \times L \times 1536}$ ($2048 \to 1536$).
+   Normalized weights: $\widetilde{A}_{ij}^{(g)} = \text{Softmax}(\beta \cdot (S_1^{(g)}[i] + S_2^{(g)}[j]))$ across the 32 active pairs.
+5. **Tile-Streamed Pallas Bilinear Contraction:**
+   Value tensor $V \in \{-1, 0, +1\}^{32 \times 512 \times 512 \times 64}$ ($536,870,912$ parameters total). 
+   * Packed 2-bit storage requires only **~105 MB VRAM**.
+   * Pallas / Triton kernels stream $V$ in **512 KB double-buffered tiles** from HBM to VMEM/SRAM, accumulating ternary values via signed additions/subtractions:
+     $$m^{(g)}[b, l, d] = \sum_{(u, v) \in \mathcal{K}_1 \times \mathcal{K}_2} \widetilde{A}_{uv}^{(g)} \cdot V^{(g)}[u, v, d] \in \mathbb{R}^{64}$$
+6. **Knowledge Projection:** $Y_{\text{know}} = \text{BitLinear}([m^{(1)}, \dots, m^{(32)}], W_{\text{out\_hop}}) \in \mathbb{R}^{B \times L \times 1536}$.
 
 #### Branch B: Continuous Representation Backbone (8 SwiGLU Layers)
 Processes $X_{\text{stem}}$ through 8 deep SwiGLU layers to construct continuous domain representations ($226,492,416$ parameters):
@@ -211,35 +209,6 @@ To eliminate the latency and instability of external Docker sandboxes, Hetman-2.
 | **Gradient Clipping** | **1.0 (Global L2-norm)** | Critical to prevent gradient spikes during STE sign flips |
 | **Weight Decay ($\lambda$)** | **0.02** for BitLinear weights; **0.0** for LayerNorms, biases, codebooks | Prevents weight collapse toward zero |
 
-### 5.5. Phase 3: High-Fidelity Uncensored Chat & Reasoning Alignment (ChatML Protocol)
-To ensure Hetman-2.0B transitions seamlessly from raw pre-trained document continuation into an intelligent, highly articulate deliberative assistant ready for immediate interactive deployment in `Rada.cpp` without post-hoc conversion scripts, the training curriculum concludes with a dedicated Supervised Fine-Tuning (SFT) phase:
-1. **ChatML Canonical Delimiter Protocol:**
-   Hetman-2.0B adopts the industry-standard ChatML structural framing with strict token encapsulation:
-   ```text
-   <|im_start|>system
-   {system_prompt}<|im_end|>
-   <|im_start|>user
-   {user_query}<|im_end|>
-   <|im_start|>assistant
-   <think>
-   {chain_of_thought_reasoning}
-   </think>
-   {direct_objective_response}<|im_end|>
-   ```
-2. **Zero-Censorship & Anti-Moralizing Objective Policy:**
-   * **The Flaw of Preachy Refusals:** Conventional safety fine-tuning introduces pervasive refusal vectors («As an AI language model, I cannot...», moral lecturing, paternalistic disclaimers) that degrade latent reasoning representations, induce false-positive refusals on legitimate academic/engineering queries (e.g. historical military doctrine, vulnerability analysis, biochemistry, criminal statutory code), and consume redundant context tokens.
-   * **Zero Refusal & Maximum Compliance:** Hetman-2.0B's SFT alignment explicitly purges moralizing boilerplate, sanctimonious refusals, and condescending disclaimers. The model responds directly, objectively, rigorously, and without hesitation to technical, historical, legal, mathematical, coding, and philosophical inquiries.
-   * **Objective Truth & Intellectual Liberty:** Grounded in Ukrainian historical deliberative philosophy (Козацька Рада), the model provides unvarnished, scholarly, and analytically complete answers, treating the user as an autonomous, adult deliberator.
-3. **Targeted Loss Masking:**
-   During Phase 3 SFT, cross-entropy loss is computed **strictly across assistant response tokens** (including `<think>...</think>` tokens). All system instructions, delimiters, and user turns are masked with label `-100`, preventing the model from memorizing user prompt styles or drifting away from robust prompt adherence.
-4. **Masculine Assistant Identity via Hardcoded System Alignment (Чоловічий рід без викривлення датасету):**
-   * **Full Preservation of Ukrainian Grammar:** The training dataset strictly preserves the full morphological and grammatical wealth of the Ukrainian language (all genders: feminine, masculine, neuter). Feminine verb endings and morphology are NEVER filtered from training corpora, ensuring the model flawlessly understands and processes female authors, characters, legal subjects, and everyday language.
-   * **General-Purpose Practical Assistant:** Hetman-2.0B is engineered as an everyday, high-utility, general-purpose AI assistant for code, math, research, writing, and chat — strictly avoiding theatrical or roleplay personas.
-   * **Rigid System-Level Self-Identification:** The assistant's masculine gender is established strictly via the canonical system prompt and instruction alignment. When the model refers to *itself* in the first-person past tense, it consistently uses masculine forms (*«я знайшов»*, *«я перевірив»*, *«я розрахував»*, *«я написав»*, *«я готовий допомогти»*):
-     ```text
-     Ти — Гетьман 2б (Hetman-2.0B), універсальний, високоінтелектуальний та корисний ШІ-асистент для будь-яких завдань. Ти чоловічого роду, тому коли говориш про себе від першої особи в минулому часі, використовуй форми чоловічого роду (наприклад: 'я проаналізував', 'я написав', 'я перевірив', 'я готовий допомогти'). Відповідай природно, чітко, прямо і по суті, без зайвих моралізаторських повчань.
-     ```
-
 ---
 
 ## 6. DATASET COMPOSITION & TOKENIZER OPTIMIZATION
@@ -255,45 +224,31 @@ To ensure Hetman-2.0B transitions seamlessly from raw pre-trained document conti
 | **TOTAL** | **850.0B**| **100.0%** | Balanced Multimodal-Code-Reasoning-UA Mix | Packed into fixed 4096-token buffers |
 
 ### 6.2. Cyrillic BPE Tokenizer ($V = 65,536$)
-* **Vocabulary Split:** 16,000 Ukrainian/Cyrillic tokens; 25,000 Code tokens; 24,512 English/General tokens; 24 Reserved Control/Special tokens.
-* **Special Framing Tokens:** Explicitly includes `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`, `<thought_summary>`, and `</thought_summary>` for native ChatML parsing and internal CoT reasoning.
+* **Vocabulary Split:** 16,000 Ukrainian/Cyrillic tokens; 25,000 Code tokens; 24,536 English/General tokens.
 * **Cyrillic Fertility Target:** **$\le 1.18$ tokens per word** on standard Ukrainian text (vs. 1.38 in Llama-3 and 2.1 in standard BPE models), increasing effective generation throughput by 20%.
-
-### 6.3. Conversational & Reasoning SFT Dataset Composition (5.0B Tokens)
-Phase 3 SFT processes **5.0 Billion tokens** (~1.25M multi-turn interactions packed into 4096-token sequences), calibrated to instill conversational versatility, deep multi-step deduction, and authoritative domain counsel:
-
-| SFT Corpus Component | Volume (Tokens) | Proportion | Primary Sources & Curation Standard | Key Competency Target |
-|---|---|---|---|---|
-| **Deep Reasoning & Synthetic CoT** | **1.50B** | **30.0%** | UltraInteract, NuminaMath-CoT, synthetic step-by-step algorithmic deduction | `<think>` variable tracing, formal mathematical proofs, logic puzzle deconstruction |
-| **High-IQ Uncensored Dialogue** | **1.50B** | **30.0%** | De-censored UltraChat, WildChat/LMSYS clean high-IQ subset, OpenHermes 2.5 | Direct instruction adherence, elimination of preachy refusals, nuanced discussion |
-| **Ukrainian Domain & Deliberative Counsel** | **1.00B** | **20.0%** | Ukrainian statutory jurisprudence, history, philosophy, administrative consulting | Expert Ukrainian deliberation, constitutional/civil law citations, cultural depth |
-| **Code Synthesis & Systems Engineering** | **1.00B** | **20.0%** | Evol-Instruct-Code, C++20/CUDA/Rust systems tasks, JSON/bash tool schema | Syntactically flawless code generation, zero-hallucination API calls, CLI tooling |
-| **TOTAL (Phase 3 SFT)** | **5.00B** | **100.0%** | **100% De-Censored, High-Compliance Multi-Turn Corpus** | **Out-of-the-box conversational readiness in `Rada.cpp`** |
 
 ---
 
 ## 7. TPU HARDWARE ALLOCATION & 28-DAY SCHEDULE AUDIT
 
-### 7.1. Compute Allocation Math (Google TRC Allocation)
+### 7.1. Compute Allocation Math (Cloud TPU v5e-128 Allocation)
 * **Total Parameters:** $N = 2.138\text{B}$; Active Compute: $N_{\text{active}} \approx 1.603\text{B}$.
-* **Phase 1 Compute (820B Tokens @ 4096 Context):**
-  * FLOPs: $6 \times 1.603\text{B} \times 820 \times 10^9 \times 1.39 \approx \mathbf{1.096 \times 10^{22} \text{ FLOPs}}$.
-* **Phase 2 Context Annealing (30B Tokens @ 256k Context):**
-  * FLOPs: $\mathbf{5.73 \times 10^{20} \text{ FLOPs}}$.
-* **Phase 3 Uncensored Chat & Reasoning SFT (5.0B Tokens @ 4096 Context):**
-  * FLOPs: $6 \times 1.603\text{B} \times 5.0 \times 10^9 \times 1.39 \approx \mathbf{6.68 \times 10^{19} \text{ FLOPs}}$.
-* **Total Compute Across All 3 Phases (855B Tokens):** $\mathbf{1.160 \times 10^{22} \text{ FLOPs}}$.
+* **Phase 1 Compute (800B Tokens @ 4096 Context):**
+  * FLOPs: $6 \times 1.603\text{B} \times 800 \times 10^9 + \text{Overhead} \approx \mathbf{8.21 \times 10^{21} \text{ FLOPs}}$.
+* **Phase 2 Context Annealing (50B Tokens @ 256k Context):**
+  * FLOPs: $\mathbf{7.85 \times 10^{20} \text{ FLOPs}}$.
+* **Total Pre-Training Compute:** $\mathbf{8.995 \times 10^{21} \text{ FLOPs}}$.
 
 ### 7.2. 28-Day Hardware Schedule (TPU v5e-128 Pod Slice)
 * **Hardware Configuration:** 128 TPU v5e chips ($128 \times 197 \text{ TFLOPS} = \mathbf{25.216 \text{ PFLOPS Peak}}$).
-* **Realistic Sustained MFU:** **$26.5\%$** for Phase 1 & Phase 3 ($6.682 \times 10^{15} \text{ FLOP/s}$); **$18.5\%$** for Phase 2 Context Annealing ($4.665 \times 10^{15} \text{ FLOP/s}$).
+* **Realistic Sustained MFU:** **$26.5\%$** for Phase 1 ($6.682 \times 10^{15} \text{ FLOP/s}$); **$18.5\%$** for Phase 2 Context Annealing.
+* **Daily Throughput:** $6.682 \times 10^{15} \times 86,400 = \mathbf{5.773 \times 10^{20} \text{ FLOP/day}}$.
 * **Execution Duration:**
-  * **Phase 1 (820B Tokens @ 4k Context):** $T_1 = \frac{1.096 \times 10^{22}}{6.682 \times 10^{15} \times 86,400} \approx \mathbf{14.22 \text{ Days}}$.
-  * **Phase 2 (30B Tokens @ 256k Context):** $T_2 = \frac{5.73 \times 10^{20}}{4.665 \times 10^{15} \times 86,400} \approx \mathbf{1.95 \text{ Days}}$.
-  * **Phase 3 (5B Tokens Chat SFT @ 4k Context):** $T_3 = \frac{6.68 \times 10^{19}}{6.682 \times 10^{15} \times 86,400} \approx \mathbf{0.35 \text{ Days (8.4 Hours)}}$.
-  * **Total Combined Training Time:** $14.22 + 1.95 + 0.35 = \mathbf{16.52 \text{ Days}}$.
+  * Phase 1 (800B Tokens @ 4k Context): $T_1 = \frac{8.21 \times 10^{21}}{5.773 \times 10^{20}} \approx \mathbf{14.22 \text{ Days}}$.
+  * Phase 2 (50B Tokens @ 256k Context): $T_2 = \frac{7.85 \times 10^{20}}{4.034 \times 10^{20}} \approx \mathbf{1.95 \text{ Days}}$.
+  * Total Training Time: $14.22 + 1.95 = \mathbf{16.17 \text{ Days}}$.
 * **Verified Contingency Buffer:**
-  $$\text{Buffer} = 28.00 - 16.52 = \mathbf{11.48 \text{ Days (275.5 Hours)}}$$
+  $$\text{Buffer} = 28.00 - 16.17 = \mathbf{11.83 \text{ Days (283.9 Hours)}}$$
   Provides a massive safety margin for Orbax asynchronous checkpointing to GCS, AOT compilation, and Borg spot preemption recovery.
 
 ---
@@ -334,40 +289,22 @@ Hetman-2.0B guarantees full 256,000-token execution on consumer graphics cards s
 
 ---
 
-## 9. EVALUATION MATRIX, VERIFICATION PROTOCOL & OPEN SCIENCE
+## 9. EVALUATION MATRIX & OPEN SCIENCE PROTOCOL
 
-### 9.1. Unit Verification vs. Post-Training Empirical Benchmark Roadmap
-To ensure strict scientific transparency and maintain academic rigor, the project enforces a clear separation between pre-training unit verification and post-training linguistic evaluation:
+### 9.1. Benchmark Evaluation Suite
+* **General World Knowledge:** MMLU (5-shot), ARC-Challenge (25-shot).
+* **Reasoning & Mathematics:** GSM8k (8-shot CoT), MATH (4-shot).
+* **Code Synthesis:** HumanEval (0-shot), MBPP (3-shot).
+* **Ukrainian Language Understanding:** UA-MMLU (Ukrainian translated & native benchmark), UA-CivilLaws (legislative reasoning QA).
+* **Long-Context Retrieval:** Needle-In-A-Haystack (retrieval fidelity up to 262,144 tokens).
 
-1. **Local Architecture & Numerical Sanity Suite (`src/test_verification.py`):**
-   * **Scope:** Unit-level verification of tensor algebra, forward/backward gradient flow, Straight-Through Estimator (STE) gradient passage, FWHT energy preservation, and NaN prevention across all 34 layers.
-   * **Role:** Developer sanity check ensuring zero runtime crashes, proper dimension alignment, and active gradient propagation before launching multi-node TPU pre-training. It does *not* substitute for downstream linguistic intelligence evaluation.
-2. **Post-Training Empirical Benchmark Suite (via `lm-evaluation-harness`):**
-   * **General World Knowledge:** MMLU (5-shot), ARC-Challenge (25-shot), HellaSwag (10-shot).
-   * **Reasoning & Mathematics:** GSM8k (8-shot CoT), MATH (4-shot).
-   * **Code Synthesis:** HumanEval (0-shot Pass@1), MBPP (3-shot).
-   * **Ukrainian Sovereign Understanding:** UA-MMLU (comprehensive Ukrainian knowledge), UA-CivilLaws (formal statutory reasoning and legal QA).
-   * **Long-Context Retrieval Fidelity:** Needle-In-A-Haystack (NIAH) and Passkey Retrieval (evaluating 100% retrieval accuracy at depths from 1k to 262,144 tokens across Phase 2 checkpoints).
-
-### 9.2. Long-Context (256k) Ingestion: Chunked Prefill Architecture
-While autoregressive token generation (decoding) over the KV cache is strictly $O(L)$ per step, prompt ingestion (prefill) across the 6 Global Softmax FlashAttention layers requires $O(L^2)$ attention computations.
-
-To guarantee that a 262,144-token document can be ingested on consumer GPUs with only 6 GB VRAM without triggering Out-Of-Memory (OOM) activation spikes:
-* **Chunked FlashAttention Prefill ($B_{\text{chunk}} = 4096 / 8192$):** Long prompts are partitioned into 4096-token chunks. The 28 Gated DeltaNet layers process chunks sequentially in $O(L)$ time with fixed $O(1)$ state carryover (3.67 MB). The 6 Global Attention layers execute incremental block-sparse FlashAttention, bounding peak activation workspace to $< 350\text{ MB}$.
-* **VRAM Cap:** Total peak memory during 256k prefill remains strictly below **2.35 GB**, leaving $> 3.65\text{ GB}$ of headroom on an RTX 2060 (6 GB).
-
-### 9.3. Empirical Hardware Profiling & Reproduction Protocol
-Performance projections and measured engine throughputs are subject to a standardized reproduction harness in `Rada.cpp`:
-* **Test Platform:** NVIDIA GeForce RTX 3060 12GB (Desktop) / RTX 4060 8GB (Mobile) / RTX 2060 6GB.
-* **Driver & Software Stack:** NVIDIA CUDA 12.x / MSVC 19.4x (C++20), Batch Size = 1, Greedy / Temperature = 0.7.
-* **Speculative Lookahead:** The $> 350\text{ tok/s}$ target is driven by the 2-token MTP speculative drafting engine, verified via synthetic binary containers in `rada_cli` prior to full-scale pre-training weight convergence. Final linguistic throughput will be published alongside checkpoint release.
-
-### 9.4. Open-Source Charter & Reproducibility
+### 9.2. Open-Source Charter & Reproducibility
 * **License:** **Apache License 2.0** (100% Free, Permissive, Commercial & Non-Commercial use permitted without royalty).
 * **Public Artifacts:** All pre-trained model weights, tokenizer tables, JAX Pallas training kernels, evaluation scripts, and synthetic data recipes will be published without restriction on Hugging Face ([YSamchuk/Hetman-2b](https://huggingface.co/YSamchuk/Hetman-2b)).
 * **Local Privacy Guarantee:** The model operates strictly local and offline. Zero telemetry, zero external API queries, zero cloud lock-in.
 
-### 9.5. Co-Designed Native Runtime: `Rada.cpp`
+### 9.3. Co-Designed Native Runtime: `Rada.cpp`
 To deliver peak throughput on consumer hardware without the bloat and mismatched primitives of standard Transformer runtimes, Hetman-2.0B is deployed via **`Rada.cpp`**:
 * **Etymology & Philosophy:** Named after the historical Ukrainian **Козацька Рада** (Cossack Council) and the concept of *«радитися»* (deliberating, consulting, seeking wise counsel) — symbolizing collective wisdom, autonomy, and deliberative decision-making.
 * **Technical Purpose:** A lightweight, pure C++20 / CUDA / Vulkan inference runtime built specifically for ternary BitNet operations, Walsh-Hadamard rotations, Gated DeltaNet state tracking, and factorized Hopfield associative retrieval.
+* **Full Specification:** Detailed in the companion architectural blueprint: `RADA_CPP_TECHNICAL_SPECIFICATION.md`.

@@ -1,6 +1,6 @@
 """
 Hetman-2.0B: Master Autonomous TPU Training & Post-Training Orchestrator (Autopilot Edition)
-Designed for: Google Cloud TPU Research Cloud (TRC) - TPU v5e-128 Pod Slice
+Designed for: Cloud TPU v5e-128 Pod Slice (High-Performance Cloud Accelerator Cluster)
 Features:
 - Complete 4-Phase Curriculum:
     Phase 1: General Pre-training 4k (820B tokens, WSD Schedule)
@@ -135,8 +135,32 @@ class StatusDashboard:
                 json.dump({"history": self.history[-1000:]}, f, indent=2)
 
 
+def compute_wsd_lr(step: int, sched_cfg: Dict[str, Any]) -> float:
+    """Warmup-Stable-Decay (WSD) learning rate schedule with long-context and SFT transitions."""
+    warmup_steps = sched_cfg.get("warmup_steps", 2000)
+    stable_steps = sched_cfg.get("stable_steps", 180652)
+    decay_steps = sched_cfg.get("decay_steps", 20000)
+    peak_lr = sched_cfg.get("peak_learning_rate", 0.0018)
+    min_lr = sched_cfg.get("min_learning_rate", 0.00018)
+    sft_lr = sched_cfg.get("sft_learning_rate", 0.00012)
+
+    p1_total = stable_steps + decay_steps
+    if step <= warmup_steps:
+        return min_lr + (peak_lr - min_lr) * (step / max(1, warmup_steps))
+    elif step <= stable_steps:
+        return peak_lr
+    elif step <= p1_total:
+        progress = (step - stable_steps) / max(1, decay_steps)
+        cosine_factor = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr + (peak_lr - min_lr) * cosine_factor
+    elif step <= p1_total + 7152:
+        return min_lr
+    else:
+        return sft_lr
+
+
 class CheckpointManager:
-    """Manages rolling checkpoints with retention of the top 3 and best checkpoint per phase."""
+    """Manages rolling checkpoints with atomic writes, reliable step-based pruning, and crash-resilient auto-resume."""
     def __init__(self, checkpoint_dir: str, max_to_keep: int = 3):
         self.checkpoint_dir = checkpoint_dir
         self.max_to_keep = max_to_keep
@@ -157,9 +181,18 @@ class CheckpointManager:
             "timestamp": time.time()
         }
 
-        torch.save(state, ckpt_path)
+        # Atomic checkpoint save to prevent corruption on preemption
+        tmp_ckpt = ckpt_path + ".tmp"
+        torch.save(state, tmp_ckpt)
+        if os.path.exists(ckpt_path):
+            try:
+                os.remove(ckpt_path)
+            except OSError:
+                pass
+        os.replace(tmp_ckpt, ckpt_path)
 
-        with open(meta_path, "w", encoding="utf-8") as f:
+        tmp_meta = meta_path + ".tmp"
+        with open(tmp_meta, "w", encoding="utf-8") as f:
             json.dump({
                 "latest_checkpoint": ckpt_path,
                 "step": step,
@@ -167,23 +200,40 @@ class CheckpointManager:
                 "loss": loss,
                 "timestamp": datetime.now().isoformat()
             }, f, indent=2)
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except OSError:
+                pass
+        os.replace(tmp_meta, meta_path)
 
         if loss < self.best_loss:
             self.best_loss = loss
             best_path = os.path.join(self.checkpoint_dir, f"best_{phase}.pt")
-            torch.save(state, best_path)
+            tmp_best = best_path + ".tmp"
+            torch.save(state, tmp_best)
+            if os.path.exists(best_path):
+                try:
+                    os.remove(best_path)
+                except OSError:
+                    pass
+            os.replace(tmp_best, best_path)
 
         self.prune()
 
     def prune(self):
         ckpts = [
-            os.path.join(self.checkpoint_dir, f)
-            for f in os.listdir(self.checkpoint_dir)
+            f for f in os.listdir(self.checkpoint_dir)
             if f.startswith("ckpt_step_") and f.endswith(".pt")
         ]
-        ckpts.sort(key=os.path.getmtime)
+        def extract_step(fname):
+            try:
+                return int(fname.split("_")[2])
+            except (IndexError, ValueError):
+                return 0
+        ckpts.sort(key=extract_step)
         while len(ckpts) > self.max_to_keep:
-            to_remove = ckpts.pop(0)
+            to_remove = os.path.join(self.checkpoint_dir, ckpts.pop(0))
             try:
                 os.remove(to_remove)
             except OSError:
@@ -191,22 +241,52 @@ class CheckpointManager:
 
     def load_latest(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> Optional[Dict[str, Any]]:
         meta_path = os.path.join(self.checkpoint_dir, "latest_checkpoint.json")
-        if not os.path.exists(meta_path):
-            return None
+        ckpt_path = None
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                ckpt_path = meta.get("latest_checkpoint")
+            except Exception as e:
+                print(f"[!] Warning: Error reading latest_checkpoint.json ({e}). Scanning directory...")
 
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            ckpt_path = meta.get("latest_checkpoint")
-            if ckpt_path and os.path.exists(ckpt_path):
-                print(f"[*] Resuming automatically from latest checkpoint: {ckpt_path}")
-                data = torch.load(ckpt_path, map_location="cpu")
+        # Collect candidate checkpoints sorted from newest to oldest
+        def extract_step(fname):
+            try:
+                return int(fname.split("_")[2].replace(".pt", ""))
+            except (IndexError, ValueError):
+                return 0
+
+        ckpts = [
+            f for f in os.listdir(self.checkpoint_dir)
+            if f.startswith("ckpt_step_") and f.endswith(".pt")
+        ]
+        ckpts.sort(key=extract_step, reverse=True)
+        
+        candidates = []
+        if ckpt_path and os.path.exists(ckpt_path):
+            candidates.append(ckpt_path)
+        for f in ckpts:
+            full_p = os.path.join(self.checkpoint_dir, f)
+            if full_p not in candidates and os.path.exists(full_p):
+                candidates.append(full_p)
+
+        # Iterate through candidates until a non-corrupt checkpoint loads successfully
+        for path in candidates:
+            try:
+                print(f"[*] Resuming from checkpoint: {path}")
+                data = torch.load(path, map_location="cpu", weights_only=False)
                 model.load_state_dict(data["model_state"])
                 if optimizer and "optimizer_state" in data:
                     optimizer.load_state_dict(data["optimizer_state"])
+                if "loss" in data and isinstance(data["loss"], (int, float)):
+                    self.best_loss = float(data["loss"])
+                print(f"[✓] Checkpoint restored successfully! Step: {data.get('step', 'unknown')}")
                 return data
-        except Exception as e:
-            print(f"[!] Warning: Error reading checkpoint metadata: {e}")
+            except Exception as e:
+                print(f"[!] Warning: Checkpoint {path} corrupted or unreadable ({e}). Attempting fallback to previous checkpoint...")
+
+        print("[*] No valid previous checkpoint could be loaded. Initializing from step 0.")
         return None
 
 
@@ -258,7 +338,7 @@ def run_autopilot(args):
 
     notifier.send(
         "Hetman-2.0B TPU Training Launched",
-        f"Cluster: Google Cloud TPU v5e-128 Pod Slice\nTotal Tokens: 855 Billion\nAuto-Resume: Active\nExport Container: .rada format",
+        f"Cluster: Cloud TPU v5e-128 Pod Slice\nTotal Tokens: 855 Billion\nAuto-Resume: Active\nExport Container: .rada format",
         status="START"
     )
 
@@ -266,13 +346,25 @@ def run_autopilot(args):
     print(f"[*] Initializing model on device: {device}")
     model = HetmanForCausalLM(hetman_config).to(device)
 
-    # Multi-parameter group optimizer
+    # Multi-parameter group optimizer (BitNet & SLH-Core standard: no decay on norms, biases, codebooks)
+    decay_params = []
+    no_decay_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if param.ndim <= 1 or "norm" in name.lower() or "bias" in name.lower() or "hopfield" in name.lower():
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        [
+            {"params": decay_params, "weight_decay": sched_cfg.get("weight_decay", 0.02)},
+            {"params": no_decay_params, "weight_decay": 0.0}
+        ],
         lr=sched_cfg.get("peak_learning_rate", 0.0018),
         betas=(sched_cfg.get("adam_beta1", 0.9), sched_cfg.get("adam_beta2", 0.95)),
-        eps=sched_cfg.get("adam_eps", 1e-6),
-        weight_decay=sched_cfg.get("weight_decay", 0.02)
+        eps=sched_cfg.get("adam_eps", 1e-6)
     )
 
     # 3. Check for Checkpoint to Resume
@@ -319,6 +411,11 @@ def run_autopilot(args):
                 )
                 current_phase = phase_name
 
+            # 1. Update Learning Rate via WSD Scheduler
+            current_lr = compute_wsd_lr(step, sched_cfg)
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = current_lr
+
             # Training step execution (Simulated synthetic batch for dry-run / standard pipeline for TPU)
             B, L = (2, 32) if args.dry_run else (4, 4096)
             input_ids = torch.randint(10, hetman_config.vocab_size, (B, L), device=device)
@@ -345,7 +442,7 @@ def run_autopilot(args):
                 tokens_processed=tokens_done,
                 total_tokens=total_tokens,
                 start_time=start_time,
-                lr=optimizer.param_groups[0]["lr"]
+                lr=current_lr
             )
 
             if step % 10 == 0 or args.dry_run:
@@ -428,11 +525,17 @@ def run_autopilot(args):
 
 
 if __name__ == "__main__":
+    core_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_config = os.path.join(core_dir, "configs", "tpu_v5e_128_config.json")
+    default_ckpt = os.path.join(core_dir, "checkpoints")
+    default_log = os.path.join(core_dir, "logs")
+    default_export = os.path.join(os.path.dirname(core_dir), "rada.cpp", "models")
+
     parser = argparse.ArgumentParser(description="Hetman-2.0B TPU Training Autopilot")
-    parser.add_argument("--config", default="configs/tpu_v5e_128_config.json", help="Path to config JSON")
-    parser.add_argument("--checkpoint_dir", default="checkpoints", help="Directory for rolling checkpoints")
-    parser.add_argument("--output_dir", default="logs", help="Directory for logs and STATUS.txt")
-    parser.add_argument("--export_dir", default="../rada.cpp/models", help="Directory to export final .rada model")
+    parser.add_argument("--config", default=default_config, help="Path to config JSON")
+    parser.add_argument("--checkpoint_dir", default=default_ckpt, help="Directory for rolling checkpoints")
+    parser.add_argument("--output_dir", default=default_log, help="Directory for logs and STATUS.txt")
+    parser.add_argument("--export_dir", default=default_export, help="Directory to export final .rada model")
     parser.add_argument("--webhook_url", default=os.environ.get("WEBHOOK_URL", None), help="Telegram/Discord/Slack webhook")
     parser.add_argument("--dry_run", action="store_true", help="Quick dry-run simulation mode")
     args = parser.parse_args()

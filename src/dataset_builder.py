@@ -286,11 +286,15 @@ class SourceAwareSequencePacker:
         self,
         writer: BinaryShardWriter,
         sequence_length: int = 4096,
-        eos_token_id: int = 5
+        bos_token_id: int = 1,
+        eos_token_id: int = 5,
+        add_bos: bool = True
     ):
         self.writer = writer
         self.sequence_length = sequence_length
+        self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
+        self.add_bos = add_bos
         
         self.active_source_id: Optional[str] = None
         self.active_split: str = "train"
@@ -320,9 +324,19 @@ class SourceAwareSequencePacker:
         """
         if self.emitted_for_source >= self.target_sequences:
             return True
+
+        if not token_ids:
+            return False
+
+        doc_tokens = []
+        if self.add_bos:
+            if token_ids[0] != self.bos_token_id:
+                doc_tokens.append(self.bos_token_id)
+        doc_tokens.extend(token_ids)
+        if doc_tokens[-1] != self.eos_token_id:
+            doc_tokens.append(self.eos_token_id)
             
-        self.buffer.extend(token_ids)
-        self.buffer.append(self.eos_token_id)
+        self.buffer.extend(doc_tokens)
         
         while len(self.buffer) >= self.sequence_length:
             if self.emitted_for_source >= self.target_sequences:

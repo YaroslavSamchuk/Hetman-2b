@@ -233,6 +233,37 @@ class DomainQualityFilters:
         return True, quality_score, None, metrics
 
     @staticmethod
+    def filter_stem_and_math(text: str) -> Tuple[bool, float, Optional[str], Dict[str, Any]]:
+        words = text.split()
+        word_count = len(words)
+        metrics = {"word_count": word_count}
+        
+        if word_count < 30:
+            return False, 0.0, "Too short (<30 words) for STEM document", metrics
+        if word_count > 60000:
+            return False, 0.0, "Unreasonably long (>60k words) - likely log/raw dump", metrics
+            
+        sttr = LexicalDiversity.compute_sttr(text, window_size=200)
+        metrics["sttr"] = round(sttr, 4)
+        if sttr < 0.20:
+            return False, sttr, f"Repetitive vocabulary (STTR={sttr:.2f} < 0.20)", metrics
+            
+        # Punctuation / noise ratio: allow up to 45% for LaTeX formulas, operators, and math syntax
+        non_alpha = sum(1 for c in text if not (c.isalnum() or c.isspace()))
+        noise_ratio = non_alpha / max(1, len(text))
+        metrics["noise_ratio"] = round(noise_ratio, 4)
+        if noise_ratio > 0.45:
+            return False, 0.0, f"Excessive noise/special characters ({noise_ratio:.2f} > 0.45)", metrics
+            
+        mean_len = sum(len(w) for w in words) / max(1, word_count)
+        metrics["mean_word_length"] = round(mean_len, 2)
+        if mean_len < 2.5 or mean_len > 15.0:
+            return False, 0.0, f"Unnatural mean word length ({mean_len:.1f})", metrics
+            
+        quality_score = min(1.0, 0.5 + sttr * 0.5)
+        return True, quality_score, None, metrics
+
+    @staticmethod
     def filter_code(text: str) -> Tuple[bool, float, Optional[str], Dict[str, Any]]:
         lines = text.splitlines()
         metrics = {"lines": len(lines)}
@@ -308,6 +339,7 @@ class DomainCalibratedDeduplicator:
         self.domain_buckets: Dict[str, List[Dict[int, List[Tuple[str, List[int]]]]]] = {
             "legal": [{} for _ in range(self.num_bands)],
             "code": [{} for _ in range(self.num_bands)],
+            "stem": [{} for _ in range(self.num_bands)],
             "prose": [{} for _ in range(self.num_bands)]
         }
 
@@ -316,6 +348,8 @@ class DomainCalibratedDeduplicator:
             return "legal"
         elif doc_type in ("code", "config"):
             return "code"
+        elif doc_type in ("stem", "math"):
+            return "stem"
         else:
             return "prose"
 
@@ -324,6 +358,8 @@ class DomainCalibratedDeduplicator:
             return 8, 0.92  # 8-word shingles, 92% Jaccard (avoids formulaic false positives)
         elif domain_key == "code":
             return 4, 0.85  # 4-word shingles, 85% Jaccard
+        elif domain_key == "stem":
+            return 5, 0.85  # 5-word shingles, 85% Jaccard
         else:
             return 5, 0.80  # 5-word shingles, 80% Jaccard
 
@@ -480,10 +516,17 @@ class DataCurationPipeline:
         
         # Stage 2: Benchmark Decontamination Check
         is_contam, bench_name, matched_span = self.decontam.check_contamination(clean_text)
+        # Resolve document language metadata
+        doc_lang = "uk"
+        if doc_type == "code" or "code" in source:
+            doc_lang = "code"
+        elif source in ("fineweb_edu", "stem_math") or "math" in source or "en" in source:
+            doc_lang = "en"
+
         if is_contam:
             self.tracker.record_drop("decontamination", f"contaminated_{bench_name}")
             return DocumentMetadata(
-                doc_id=doc_id, source=source, license=license_str, language="uk",
+                doc_id=doc_id, source=source, license=license_str, language=doc_lang,
                 doc_type=doc_type, quality_score=0.0, raw_hash=raw_hash, clean_hash=clean_hash,
                 token_count=tokens, split="rejected", rejection_stage="decontamination",
                 rejection_reason=f"Matched test benchmark '{bench_name}': {matched_span[:40]}...",
@@ -495,6 +538,8 @@ class DataCurationPipeline:
             is_valid, q_score, reason, metrics = self.filters.filter_legal(clean_text)
         elif doc_type == "code":
             is_valid, q_score, reason, metrics = self.filters.filter_code(clean_text)
+        elif doc_type in ("stem", "math"):
+            is_valid, q_score, reason, metrics = self.filters.filter_stem_and_math(clean_text)
         else:
             is_valid, q_score, reason, metrics = self.filters.filter_prose_and_educational(clean_text)
             
@@ -502,7 +547,7 @@ class DataCurationPipeline:
         if not is_valid:
             self.tracker.record_drop("domain_quality", reason or "quality_filter")
             return DocumentMetadata(
-                doc_id=doc_id, source=source, license=license_str, language="uk",
+                doc_id=doc_id, source=source, license=license_str, language=doc_lang,
                 doc_type=doc_type, quality_score=q_score, raw_hash=raw_hash, clean_hash=clean_hash,
                 token_count=tokens, split="rejected", rejection_stage="domain_quality",
                 rejection_reason=reason, filter_metrics=metrics
@@ -514,7 +559,7 @@ class DataCurationPipeline:
             stage_name = "exact_dedup" if dup_type in ("exact", "cross_source") else "near_dedup"
             self.tracker.record_drop(stage_name, dup_type or "duplicate")
             return DocumentMetadata(
-                doc_id=doc_id, source=source, license=license_str, language="uk",
+                doc_id=doc_id, source=source, license=license_str, language=doc_lang,
                 doc_type=doc_type, quality_score=q_score, raw_hash=raw_hash, clean_hash=clean_hash,
                 token_count=tokens, split="rejected", is_duplicate=True,
                 duplicate_type=dup_type, rejection_stage=stage_name,
@@ -523,7 +568,7 @@ class DataCurationPipeline:
             
         # Stage 5: Accepted Clean Document
         return DocumentMetadata(
-            doc_id=doc_id, source=source, license=license_str, language="uk",
+            doc_id=doc_id, source=source, license=license_str, language=doc_lang,
             doc_type=doc_type, quality_score=q_score, raw_hash=raw_hash, clean_hash=clean_hash,
             token_count=tokens, split="train", rejection_stage=None,
             rejection_reason=None, filter_metrics=metrics

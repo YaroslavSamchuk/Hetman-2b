@@ -1,17 +1,17 @@
-# Official Compute Grant Application: Google Cloud TPU Research Cloud (TRC)
+# Official Compute Grant Application: Cloud TPU v5e-128 Acceleration Grant
 ## Project: Hetman-2.0B High-Efficiency Open-Source Foundation Model
-### Order Reference: `TRC-2026-UA-HETMAN-2B-DISPATCH`
+### Order Reference: `GRANT-2026-UA-HETMAN-2B-DISPATCH`
 
 ---
 
 ### 1. Executive Summary & Project Abstract
 * **Principal Investigator:** Yaroslav Samchuk
 * **Project Name:** Hetman-2.0B (`hetman-ai/hetman-core`)
-* **Requested Compute Resource:** Google Cloud **TPU v5e-128 Pod Slice** (128 accelerator chips, 2,048 GB HBM)
+* **Requested Compute Resource:** **Cloud TPU v5e-128 Pod Slice** (128 accelerator chips, 2,048 GB HBM)
 * **Grant Window Duration:** **28 Calendar Days** (Zone: `us-east1-d` / Spot or Reserved Capacity)
 * **Pre-Training & Alignment Token Budget:** **855 Billion Tokens** (Phase 1: 820B at 4k context; Phase 2: 30B annealing at 256k context; Phase 3: 5B uncensored chat & reasoning SFT)
 * **Pure Compute Training Time:** **16.52 Days** (14.22 days Phase 1 + 1.95 days Phase 2 + 0.35 days Phase 3 SFT)
-* **Safety Contingency Buffer:** **11.48 Days (41.0%) / 275.5 Hours** for Orbax asynchronous checkpointing, AOT compilation, and Borg preemption recovery.
+* **Safety Contingency Buffer:** **11.48 Days (41.0%) / 275.5 Hours** for asynchronous checkpointing, AOT compilation, and node preemption recovery.
 * **Licensing & Open Source Commitment:** **100% Free & Permissive Open Source under Apache License 2.0**. All pre-trained weights, tokenizer tables, JAX Pallas kernels, evaluation scripts, and C++ inference runtimes will be published publicly on Hugging Face and GitHub.
 
 ---
@@ -39,9 +39,9 @@ Hetman-2.0B breaks the monolithic memory bottleneck in sub-3B models by introduc
 ---
 
 ### 4. Software Stack & Reproducibility
-* **Framework:** JAX / Flax / Pallas.
-* **Checkpointing:** Google Orbax async checkpointing directly to Google Cloud Storage (`gs://hetman-checkpoints/`).
-* **Data Loader:** Google Grain DataLoader streaming sharded ArrayRecord datasets.
+* **Framework:** JAX / Flax / Pallas / PyTorch.
+* **Checkpointing:** Orbax async checkpointing directly to cloud object storage (`gs://hetman-checkpoints/` or S3).
+* **Data Loader:** High-throughput streaming sharded ArrayRecord / mmap datasets.
 * **Serving Runtime:** Co-designed open-source C++20 engine `Rada.cpp` under Apache 2.0.
 
 ---

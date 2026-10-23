@@ -18,10 +18,10 @@ tags:
 - jax
 pipeline_tag: text-generation
 widget:
-- text: "<|im_start|>system\nТи — Гетьман 2б (Hetman-2.0B), корисний, розумний та об'єктивний ШІ-асистент.<|im_end|>\n<|im_start|>user\nПоясни як працює асоціативна пам'ять Хопфілда.<|im_end|>\n<|im_start|>assistant\n<think>\n"
+- text: "<|im_start|>system\nYou are Hetman-2.0B, a helpful, intelligent, and objective AI assistant.<|im_end|>\n<|im_start|>user\nExplain how Hopfield associative memory works in neural architectures.<|im_end|>\n<|im_start|>assistant\n<think>\n"
 ---
 
-# Hetman-2.0B («Гетьман 2б»)
+# Hetman-2.0B
 ### 2.14B Total Parameters (~1.603B Active) | BitNet b1.58 Ternary | 16.78M Hopfield Slots | 256k Context | TPU v5e-128
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -32,13 +32,13 @@ widget:
 
 > ⚠️ **Project Status: Architecture & Production Tokenizer Release (Pre-Training Phase)**  
 > This repository hosts the official architectural specification, production BPE tokenizer artifacts, and complete PyTorch modeling code for **Hetman-2.0B**.  
-> **Pre-training on 855 billion tokens** across Google Cloud TPU v5e-128 pods is scheduled under the Google TPU Research Cloud (TRC) grant. Full pre-trained weights (`model.safetensors` and `.rada` single-file containers) will be published directly to this repository upon training completion.
+> **Pre-training on 855 billion tokens** across Cloud TPU v5e-128 pods is scheduled on high-throughput accelerator infrastructure. Full pre-trained weights (`model.safetensors` and `.rada` single-file containers) will be published directly to this repository upon training completion.
 
 ---
 
 ## 🏛️ Architectural Highlights
 
-**Hetman-2.0B** is an open-source, edge-native foundation model designed from first principles for high-throughput pre-training on **Google Cloud TPU v5e-128 Pod Slices** and ultra-efficient local inference on consumer GPUs with **$\ge 6$ GB VRAM** (RTX 2060+, RTX 3060, RTX 4060, and Apple Silicon).
+**Hetman-2.0B** is an open-source, edge-native foundation model designed from first principles for high-throughput pre-training on **Cloud TPU v5e-128 Pod Slices** and ultra-efficient local inference on consumer GPUs with **$\ge 6$ GB VRAM** (RTX 2060+, RTX 3060, RTX 4060, and Apple Silicon).
 
 * **Nominal Capacity:** 2,137,522,176 parameters (~2.138B storage footprint).
 * **Active Compute per Token:** ~1,602,748,416 parameters (~1.603B active compute) via Top-32 sparse associative memory retrieval.
@@ -61,8 +61,8 @@ from transformers import AutoTokenizer
 # Load the official Hetman-2.0B tokenizer
 tokenizer = AutoTokenizer.from_pretrained("YSamchuk/Hetman-2b")
 
-# Test Ukrainian morphology and apostrophe normalization
-text = "Гетьман 2б — суверенна мовна модель із контекстом 256k токенів та пам'яттю Хопфілда."
+# Test tokenization and encoding
+text = "Hetman-2.0B is an open-source foundation model engineered with 256k context and Hopfield associative memory."
 tokens = tokenizer.tokenize(text)
 token_ids = tokenizer.encode(text)
 

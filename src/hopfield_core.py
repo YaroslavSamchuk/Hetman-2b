@@ -127,6 +127,13 @@ class SpeculativeLatentHopfieldCore(nn.Module):
                                 ones2.view(-1, self.num_groups, self.topk_2).permute(1, 0, 2).reshape(self.num_groups, -1))
                 f2 = f2 / total_tokens
                 
+                # In multi-GPU distributed training, synchronize slot usage frequencies across ranks
+                if torch.distributed.is_available() and torch.distributed.is_initialized():
+                    torch.distributed.all_reduce(f1, op=torch.distributed.ReduceOp.SUM)
+                    f1 = f1 / torch.distributed.get_world_size()
+                    torch.distributed.all_reduce(f2, op=torch.distributed.ReduceOp.SUM)
+                    f2 = f2 / torch.distributed.get_world_size()
+
                 # Target frequency per slot
                 target_f1 = self.topk_1 / float(self.codebook_size)
                 target_f2 = self.topk_2 / float(self.codebook_size)
@@ -166,7 +173,7 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             
             # Sub-tensor gathering: V[g, idx1, idx2, :]
             Vg = self.V[g]
-            V_sub = Vg[idx1.unsqueeze(-1), idx2.unsqueeze(-2)]  # [B, L, 8, 4, 128]
+            V_sub = Vg[idx1.unsqueeze(-1), idx2.unsqueeze(-2)]  # [B, L, 8, 4, 32]
             V_sub_flat = V_sub.view(B, L, self.topk_1 * self.topk_2, self.val_dim)
             
             # Weighted sum over 32 active attractor slots (32-dim micro-fact representation)
@@ -185,12 +192,12 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         # 6. Knowledge projection back to 1536
         y_know = self.out_proj(m_concat)
         
-        # 7. Commitment loss (binds subqueries to centroids without entropy conflict)
-        weights_c1 = F.softmax(top1_vals, dim=-1).unsqueeze(-1)
+        # 7. Commitment loss (binds subqueries to centroids using unskewed raw cosine similarity)
+        weights_c1 = F.softmax(self.beta * raw_top1_vals, dim=-1).unsqueeze(-1)
         c1_active = C1_norm[torch.arange(self.num_groups, device=x.device).view(1, 1, self.num_groups, 1), top1_idx]
         c1_bar = (weights_c1 * c1_active).sum(dim=-2)
         
-        weights_c2 = F.softmax(top2_vals, dim=-1).unsqueeze(-1)
+        weights_c2 = F.softmax(self.beta * raw_top2_vals, dim=-1).unsqueeze(-1)
         c2_active = C2_norm[torch.arange(self.num_groups, device=x.device).view(1, 1, self.num_groups, 1), top2_idx]
         c2_bar = (weights_c2 * c2_active).sum(dim=-2)
         

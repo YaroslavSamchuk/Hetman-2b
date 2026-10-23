@@ -8,6 +8,7 @@ and Elastic Thinking Compaction.
 """
 
 import math
+from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any, List
 import torch
 import torch.nn as nn
@@ -16,6 +17,27 @@ from .configuration_hetman import HetmanConfig
 from .quantization import BitLinear
 from .deltanet import GatedDeltaNet
 from .hopfield_core import SpeculativeLatentHopfieldCore
+
+@dataclass
+class HetmanCausalLMOutput:
+    loss: Optional[torch.Tensor] = None
+    logits: Optional[torch.Tensor] = None
+    ce_loss: Optional[torch.Tensor] = None
+    mtp_loss: Optional[torch.Tensor] = None
+    hopfield_loss: Optional[torch.Tensor] = None
+    past_states: Optional[Any] = None
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __contains__(self, item):
+        return hasattr(self, item)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
 class YaRNRotaryEmbedding(nn.Module):
     """
@@ -61,7 +83,10 @@ class YaRNRotaryEmbedding(nn.Module):
         device = x.device
         if position_ids is not None:
             if position_ids.dim() == 2:
-                t = position_ids[0].to(self.inv_freq.dtype)
+                # [B, L] -> freqs: [B, L, dim // 2]
+                freqs = position_ids.unsqueeze(-1).to(self.inv_freq.dtype) * self.inv_freq.view(1, 1, -1)
+                emb = torch.cat((freqs, freqs), dim=-1)  # [B, L, dim]
+                return emb.cos().to(x.dtype), emb.sin().to(x.dtype)
             else:
                 t = position_ids.to(self.inv_freq.dtype)
         else:
@@ -76,8 +101,12 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat((-x2, x1), dim=-1)
 
 def apply_rotary_pos_emb(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    cos = cos.unsqueeze(0).unsqueeze(2)
-    sin = sin.unsqueeze(0).unsqueeze(2)
+    if cos.dim() == 2:
+        cos = cos.unsqueeze(0).unsqueeze(2)  # [1, L, 1, D]
+        sin = sin.unsqueeze(0).unsqueeze(2)
+    elif cos.dim() == 3:
+        cos = cos.unsqueeze(2)               # [B, L, 1, D]
+        sin = sin.unsqueeze(2)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
@@ -219,7 +248,21 @@ class MTPHead(nn.Module):
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         return self.final_norm(h + self.ffn(self.norm(h)))
 
-class HetmanModel(nn.Module):
+
+try:
+    from transformers import PreTrainedModel
+except ImportError:
+    class PreTrainedModel(nn.Module):
+        def __init__(self, config, *args, **kwargs):
+            super().__init__()
+            self.config = config
+
+class HetmanPreTrainedModel(PreTrainedModel):
+    config_class = HetmanConfig
+    base_model_prefix = "model"
+    supports_gradient_checkpointing = True
+
+class HetmanModel(HetmanPreTrainedModel):
     def __init__(self, config: HetmanConfig):
         super().__init__()
         self.config = config
@@ -337,20 +380,9 @@ class HetmanModel(nn.Module):
         x_out = self.final_norm(x_exit)
         return x_out, hopfield_loss, new_states
 
-try:
-    from transformers import PreTrainedModel
-except ImportError:
-    class PreTrainedModel(nn.Module):
-        def __init__(self, config, *args, **kwargs):
-            super().__init__()
-            self.config = config
-
-class HetmanForCausalLM(PreTrainedModel):
-    config_class = HetmanConfig
-    base_model_prefix = "model"
-
+class HetmanForCausalLM(HetmanPreTrainedModel):
     def __init__(self, config: HetmanConfig):
-        super().__init__(config)
+        super().__init__()
         self.config = config
         self.logit_softcap = getattr(config, "logit_softcap", 30.0)
         self.model = HetmanModel(config)
@@ -419,14 +451,14 @@ class HetmanForCausalLM(PreTrainedModel):
             # Composite loss: CE + 0.3 * MTP + 0.005 * Hopfield commitment
             loss = ce_loss + 0.3 * mtp_loss + 0.005 * hopfield_loss
             
-        return {
-            "loss": loss,
-            "logits": logits,
-            "ce_loss": ce_loss,
-            "mtp_loss": mtp_loss,
-            "hopfield_loss": hopfield_loss,
-            "past_states": new_states
-        }
+        return HetmanCausalLMOutput(
+            loss=loss,
+            logits=logits,
+            ce_loss=ce_loss,
+            mtp_loss=mtp_loss,
+            hopfield_loss=hopfield_loss,
+            past_states=new_states
+        )
 
     @torch.no_grad()
     def generate(
@@ -436,10 +468,14 @@ class HetmanForCausalLM(PreTrainedModel):
         temperature: float = 0.7,
         top_p: float = 0.9,
         eos_token_id: Any = (2, 5),  # </s> (2) and <|im_end|> (5)
-        pad_token_id: int = 3
+        pad_token_id: int = 3,
+        do_sample: Optional[bool] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs
     ) -> torch.Tensor:
         """
         Autoregressive generation with KV-cache / recurrent state preservation.
+        Fully compatible with Hugging Face generate() callers and standard sampling pipelines.
         """
         device = next(self.parameters()).device
         if input_ids is None or input_ids.numel() == 0:
@@ -462,6 +498,10 @@ class HetmanForCausalLM(PreTrainedModel):
             
         unfinished_sequences = torch.ones(B, dtype=torch.bool, device=device)
         
+        # If do_sample is explicitly False, force greedy argmax decoding
+        if do_sample is False:
+            temperature = 0.0
+            
         # Initial prefill pass
         outputs = self(current_ids, past_states=None, offset=0)
         past_states = outputs["past_states"]
@@ -501,7 +541,7 @@ class HetmanForCausalLM(PreTrainedModel):
                 break
                 
             if step < max_new_tokens - 1:
-                step_outputs = self(next_token, past_states=past_states, offset=seq_len + step)
+                step_outputs = self(tokens_to_append, past_states=past_states, offset=seq_len + step)
                 past_states = step_outputs["past_states"]
                 next_token_logits = step_outputs["logits"][:, -1, :]
             

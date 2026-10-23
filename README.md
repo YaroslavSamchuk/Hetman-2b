@@ -12,7 +12,7 @@
 
 ## 📌 Executive Summary
 
-**Hetman-2.0B** («Гетьман 2б») is an open-source, edge-native sovereign foundation model engineered from first principles for high-throughput pre-training on **Google Cloud TPU v5e-128 Pod Slices** (via the Google TPU Research Cloud grant program) and cost-effective local inference on accessible consumer GPUs with **$\ge 6$ GB VRAM** (NVIDIA GeForce RTX 2060 6GB+, RTX 3060, RTX 4060, and Apple Silicon).
+**Hetman-2.0B** is an open-source, edge-native sovereign foundation model engineered from first principles for high-throughput pre-training on **Cloud TPU v5e-128 Pod Slices** (High-Performance Cloud Accelerator Cluster) and cost-effective local inference on accessible consumer GPUs with **$\ge 6$ GB VRAM** (NVIDIA GeForce RTX 2060 6GB+, RTX 3060, RTX 4060, and Apple Silicon).
 
 * **Nominal Capacity:** 2,137,522,176 parameters (~2.138B storage footprint).
 * **Active Compute per Token:** ~1,602,748,416 parameters (~1.603B active compute) via Top-32 sparse associative memory retrieval.
@@ -56,10 +56,10 @@
 
 ## 🤖 TPU Autonomous Autopilot Suite
 
-For hands-off, continuous pre-training on Google Cloud TPU v5e-128 pods, the repository includes a complete **Set-and-Forget Autopilot Suite**:
+For hands-off, continuous pre-training on Cloud TPU v5e-128 pods, the repository includes a complete **Set-and-Forget Autopilot Suite**:
 
-* **[`src/train_autopilot.py`](file:///c:/Users/samch/Downloads/TH1/hetman-core/src/train_autopilot.py):** Automated lifecycle manager with crash detection, exponential backoff restart, GCS checkpoint sync, and automatic export to `.rada` format upon completion.
-* **[`scripts/launch_autopilot.sh`](file:///c:/Users/samch/Downloads/TH1/hetman-core/scripts/launch_autopilot.sh):** Background launch script for Google Cloud VMs with TPU slices.
+* **[`src/train_autopilot.py`](file:///c:/Users/samch/Downloads/TH1/hetman-core/src/train_autopilot.py):** Automated lifecycle manager with crash detection, exponential backoff restart, cloud checkpoint sync, and automatic export to `.rada` format upon completion.
+* **[`scripts/launch_autopilot.sh`](file:///c:/Users/samch/Downloads/TH1/hetman-core/scripts/launch_autopilot.sh):** Background launch script for Cloud VMs with TPU slices.
 * **[`scripts/status.sh`](file:///c:/Users/samch/Downloads/TH1/hetman-core/scripts/status.sh):** Live progress monitor displaying loss curves, tokens processed, ETA, and hardware health.
 * **[`scripts/stop_training.sh`](file:///c:/Users/samch/Downloads/TH1/hetman-core/scripts/stop_training.sh):** Graceful shutdown script saving an emergency checkpoint before terminating.
 
@@ -106,7 +106,7 @@ Expected output:
 
 To adhere to open-source rigor and distinguish between architectural projections and empirical evaluations:
 
-1. **Project Phase:** Hetman-2.0B is currently in the **Pre-Training Architecture & Engineering Phase** pending Google TPU Research Cloud (TRC) compute allocation.
+1. **Project Phase:** Hetman-2.0B is currently in the **Pre-Training Architecture & Engineering Phase** pending Cloud TPU v5e-128 compute allocation.
 2. **Local Unit Sanity (`test_verification.py`):** Serves as a code and numerical unit test (shapes, gradient backward pass, loss reduction). It verifies mathematical soundness, not downstream NLP task performance.
 3. **Post-Training Benchmark Roadmap:** Upon pre-training completion, empirical evaluation will be conducted via `lm-evaluation-harness` across:
    * **General Reasoning:** MMLU (5-shot), GSM8K (8-shot CoT), HumanEval (0-shot Pass@1), ARC-Challenge.
