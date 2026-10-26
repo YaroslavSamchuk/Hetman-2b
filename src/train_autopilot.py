@@ -17,6 +17,7 @@ Features:
 import os
 import sys
 import time
+import math
 import json
 import argparse
 import hashlib
@@ -396,6 +397,9 @@ def run_autopilot(args):
     # In dry_run or local test mode, simulate micro-steps
     run_steps = 10 if args.dry_run else (total_steps - start_step + 1)
     end_step = min(start_step + run_steps - 1, total_steps)
+
+    step = start_step
+    step_loss = 0.0
 
     try:
         for step in range(start_step, end_step + 1):
