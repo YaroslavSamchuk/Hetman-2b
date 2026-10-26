@@ -10,8 +10,12 @@ import zlib
 import numpy as np
 import torch
 from typing import Tuple, Optional
-from configuration_hetman import HetmanConfig
-from modeling_hetman import HetmanForCausalLM
+try:
+    from .configuration_hetman import HetmanConfig
+    from .modeling_hetman import HetmanForCausalLM
+except ImportError:
+    from configuration_hetman import HetmanConfig
+    from modeling_hetman import HetmanForCausalLM
 
 RADA_MAGIC = 0x41444152   # 'RADA'
 RADA_VERSION = 1

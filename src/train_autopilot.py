@@ -332,6 +332,14 @@ def run_autopilot(args):
         )
 
     # 2. Setup Subsystems
+    import signal
+    def _graceful_signal_handler(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, _graceful_signal_handler)
+    except (AttributeError, ValueError):
+        pass
+
     notifier = WebhookNotifier(args.webhook_url)
     dashboard = StatusDashboard(args.output_dir)
     ckpt_mgr = CheckpointManager(args.checkpoint_dir, max_to_keep=3)
