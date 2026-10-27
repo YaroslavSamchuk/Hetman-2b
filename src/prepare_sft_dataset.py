@@ -14,9 +14,11 @@ from torch.utils.data import Dataset, DataLoader
 from tokenizers import Tokenizer
 
 # Canonical ChatML Special Token IDs
-IM_START_ID = 4   # <|im_start|>
-IM_END_ID = 5     # <|im_end|>
-PAD_TOKEN_ID = 3  # <pad>
+IM_START_ID = 4       # <|im_start|>
+IM_END_ID = 5         # <|im_end|>
+PAD_TOKEN_ID = 3      # <pad>
+TOOL_CALL_ID = 10     # <|call|>
+TOOL_RETURN_ID = 11   # <|return|>
 IGNORE_INDEX = -100
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -30,7 +32,9 @@ ROLE_ALIASES = {
     "assistant": "assistant",
     "gpt": "assistant",
     "bot": "assistant",
-    "system": "system"
+    "system": "system",
+    "tool": "tool",
+    "function": "tool"
 }
 
 def sanitize_and_normalize_conversation(
@@ -76,7 +80,7 @@ def sanitize_and_normalize_conversation(
         else:
             merged_turns.append(turn)
 
-    while merged_turns and merged_turns[-1]["role"] == "user":
+    while merged_turns and merged_turns[-1]["role"] in ("user", "tool"):
         merged_turns.pop()
 
     if not any(t["role"] == "assistant" for t in merged_turns):
@@ -157,10 +161,23 @@ def tokenize_and_mask_chatml(
         turn_ids = prefix_ids + content_ids + suffix_ids
         
         if role == "assistant":
-            if supervise_only_last_turn and idx != last_asst_idx:
+            # Prefix (<|im_start|>assistant\n) is masked; content and suffix are active targets
+            turn_labels = ([IGNORE_INDEX] * len(prefix_ids)) + list(content_ids) + suffix_ids
+            # Historical turn without tool calling: mask if supervise_only_last_turn is active
+            if supervise_only_last_turn and idx != last_asst_idx and "<|call|>" not in content:
                 turn_labels = [IGNORE_INDEX] * len(turn_ids)
             else:
-                turn_labels = ([IGNORE_INDEX] * len(prefix_ids)) + content_ids + suffix_ids
+                # If thought summary tags exist in historical turns, mask them so model never trains on summaries
+                in_summary = False
+                for t_idx, tid in enumerate(content_ids):
+                    if tid == 8: # RADA_TOKEN_THOUGHT_SUMMARY (<thought_summary>)
+                        in_summary = True
+                        turn_labels[len(prefix_ids) + t_idx] = IGNORE_INDEX
+                    elif tid == 9: # RADA_TOKEN_THOUGHT_SUMMARY_END (</thought_summary>)
+                        in_summary = False
+                        turn_labels[len(prefix_ids) + t_idx] = IGNORE_INDEX
+                    elif in_summary:
+                        turn_labels[len(prefix_ids) + t_idx] = IGNORE_INDEX
         else:
             turn_labels = [IGNORE_INDEX] * len(turn_ids)
             

@@ -139,22 +139,25 @@ class StatusDashboard:
 def compute_wsd_lr(step: int, sched_cfg: Dict[str, Any]) -> float:
     """Warmup-Stable-Decay (WSD) learning rate schedule with long-context and SFT transitions."""
     warmup_steps = sched_cfg.get("warmup_steps", 2000)
-    stable_steps = sched_cfg.get("stable_steps", 180652)
+    stable_steps = sched_cfg.get("stable_steps", 173503)
     decay_steps = sched_cfg.get("decay_steps", 20000)
     peak_lr = sched_cfg.get("peak_learning_rate", 0.0018)
     min_lr = sched_cfg.get("min_learning_rate", 0.00018)
     sft_lr = sched_cfg.get("sft_learning_rate", 0.00012)
 
-    p1_total = stable_steps + decay_steps
+    p1_stable_end = warmup_steps + stable_steps  # 175,503
+    p1_total = p1_stable_end + decay_steps       # 195,503
+    p2_total = p1_total + sched_cfg.get("longcontext_steps", 7153) # 202,656
+
     if step <= warmup_steps:
         return min_lr + (peak_lr - min_lr) * (step / max(1, warmup_steps))
-    elif step <= stable_steps:
+    elif step <= p1_stable_end:
         return peak_lr
     elif step <= p1_total:
-        progress = (step - stable_steps) / max(1, decay_steps)
+        progress = (step - p1_stable_end) / max(1, decay_steps)
         cosine_factor = 0.5 * (1.0 + math.cos(math.pi * progress))
         return min_lr + (peak_lr - min_lr) * cosine_factor
-    elif step <= p1_total + 7152:
+    elif step <= p2_total:
         return min_lr
     else:
         return sft_lr
@@ -277,9 +280,13 @@ class CheckpointManager:
             try:
                 print(f"[*] Resuming from checkpoint: {path}")
                 data = torch.load(path, map_location="cpu", weights_only=False)
-                model.load_state_dict(data["model_state"])
-                if optimizer and "optimizer_state" in data:
-                    optimizer.load_state_dict(data["optimizer_state"])
+                state_dict = data.get("model_state") or data.get("model_state_dict") or data.get("state_dict") or data.get("model")
+                if state_dict is None:
+                    raise KeyError(f"No recognized model state dict key found in {path}. Keys: {list(data.keys())}")
+                model.load_state_dict(state_dict)
+                opt_state = data.get("optimizer_state") or data.get("optimizer_state_dict") or data.get("optimizer")
+                if optimizer and opt_state:
+                    optimizer.load_state_dict(opt_state)
                 if "loss" in data and isinstance(data["loss"], (int, float)):
                     self.best_loss = float(data["loss"])
                 print(f"[✓] Checkpoint restored successfully! Step: {data.get('step', 'unknown')}")
@@ -356,22 +363,28 @@ def run_autopilot(args):
     model = HetmanForCausalLM(hetman_config).to(device)
 
     # Multi-parameter group optimizer (BitNet & SLH-Core standard: no decay on norms, biases, codebooks)
-    decay_params = []
+    bitlinear_lr = sched_cfg.get("optimizer_parameter_groups", {}).get("bitlinear_ternary_lr", sched_cfg.get("peak_learning_rate", 0.0018))
+    dense_lr = sched_cfg.get("optimizer_parameter_groups", {}).get("dense_embeddings_hopfield_lr", 0.0003)
+
+    bitlinear_decay = []
+    dense_decay = []
     no_decay_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
         if param.ndim <= 1 or "norm" in name.lower() or "bias" in name.lower() or "hopfield" in name.lower():
             no_decay_params.append(param)
+        elif "embed" in name.lower() or "lm_head" in name.lower() or "fusion" in name.lower():
+            dense_decay.append(param)
         else:
-            decay_params.append(param)
+            bitlinear_decay.append(param)
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": decay_params, "weight_decay": sched_cfg.get("weight_decay", 0.02)},
-            {"params": no_decay_params, "weight_decay": 0.0}
+            {"params": bitlinear_decay, "lr": bitlinear_lr, "initial_lr": bitlinear_lr, "weight_decay": sched_cfg.get("weight_decay", 0.02)},
+            {"params": dense_decay, "lr": dense_lr, "initial_lr": dense_lr, "weight_decay": sched_cfg.get("weight_decay", 0.02)},
+            {"params": no_decay_params, "lr": dense_lr, "initial_lr": dense_lr, "weight_decay": 0.0}
         ],
-        lr=sched_cfg.get("peak_learning_rate", 0.0018),
         betas=(sched_cfg.get("adam_beta1", 0.9), sched_cfg.get("adam_beta2", 0.95)),
         eps=sched_cfg.get("adam_eps", 1e-6)
     )
@@ -383,16 +396,16 @@ def run_autopilot(args):
     tokens_done = (start_step - 1) * sched_cfg.get("global_batch_size_tokens", 4194304)
 
     total_tokens = sched_cfg.get("total_tokens", 855000000000)
-    total_steps = sched_cfg.get("total_steps", 203845)
+    total_steps = sched_cfg.get("total_steps", 204248)
     start_time = time.time()
 
     print(f"[*] Starting Autopilot from step {start_step:,} / {total_steps:,} (Phase: {current_phase})")
 
     # Define Phase Boundaries
-    p1_steps = sched_cfg.get("stable_steps", 180652) + sched_cfg.get("decay_steps", 20000)
-    p2_steps = p1_steps + 7152
+    p1_steps = sched_cfg.get("warmup_steps", 2000) + sched_cfg.get("stable_steps", 173503) + sched_cfg.get("decay_steps", 20000)
+    p2_steps = p1_steps + sched_cfg.get("longcontext_steps", 7153)
     p3_steps = p2_steps + sched_cfg.get("sft_steps", 1192)
-    p4_steps = p3_steps + 400
+    p4_steps = p3_steps + sched_cfg.get("rl_steps", 400)
 
     # In dry_run or local test mode, simulate micro-steps
     run_steps = 10 if args.dry_run else (total_steps - start_step + 1)
@@ -425,8 +438,11 @@ def run_autopilot(args):
 
             # 1. Update Learning Rate via WSD Scheduler
             current_lr = compute_wsd_lr(step, sched_cfg)
+            peak_lr = sched_cfg.get("peak_learning_rate", 0.0018)
+            lr_scale = current_lr / peak_lr
             for param_group in optimizer.param_groups:
-                param_group["lr"] = current_lr
+                base_lr = param_group.get("initial_lr", current_lr)
+                param_group["lr"] = base_lr * lr_scale
 
             # Training step execution (Simulated synthetic batch for dry-run / standard pipeline for TPU)
             B, L = (2, 32) if args.dry_run else (4, 4096)
