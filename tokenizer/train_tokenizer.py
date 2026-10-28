@@ -144,15 +144,18 @@ def bootstrap_base_tokenizer(output_dir: str = "tokenizer") -> Tokenizer:
     seed_corpus_path = os.path.join(output_dir, "seed_corpus.txt")
     
     # Exhaustive seed ensuring all 33 Ukrainian letters (both uppercase and lowercase, standalone and with space)
+    # and all Ukrainian apostrophe variants (ASCII ', right curly ’, and modifier ʼ)
     # are merged into atomic single tokens without decomposing into bytes
     ua_letters_upper = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"
     ua_letters_lower = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
+    ua_apostrophes = ["'", "’", "ʼ"]
     
-    # Repeat isolated letters directly to build direct 2-byte merges for every Ukrainian character
+    # Repeat isolated letters and apostrophes directly to build direct merges
     isolated_upper = "\n".join(f"{ch} {ch} {ch}{ch}" for ch in ua_letters_upper) + "\n"
     isolated_lower = "\n".join(f"{ch} {ch} {ch}{ch}" for ch in ua_letters_lower) + "\n"
+    isolated_apos = "\n".join(f"{ch} {ch} {ch}{ch}" for ch in ua_apostrophes) + "\n"
     
-    # Words starting with each letter in uppercase and lowercase
+    # Words starting with each letter in uppercase and lowercase, and words with all apostrophe variants
     ua_sample_words = (
         "Андрій Береза Воля Голос Ґрунт Дніпро Енергія Європа Життя Закон Ідея Їжак Йосип "
         "Київ Людина Місто Нація Океан Прапор Розум Світ Тарас Україна Фізика Харків Центр Час Шевченко Щастя Юність Ярослав "
@@ -161,10 +164,13 @@ def bootstrap_base_tokenizer(output_dir: str = "tokenizer") -> Tokenizer:
         "ґанок ґудзик аґрус ґрунт дзиґа Ґанок Ґудзик Аґрус Ґрунт Дзиґа "
         "їжак поїзд країна Україна їсти їдальня Їжак Поїзд Країна Україна Їсти Їдальня "
         "єнот єдність Європа єпископ Єнот Єдність Європа Єпископ "
-        "інтернет історія ідея іспит Інтернет Історія Ідея Іспит Іван Київ Львів Харків Одеса Дніпро\n"
+        "інтернет історія ідея іспит Інтернет Історія Ідея Іспит Іван Київ Львів Харків Одеса Дніпро "
+        "м'яч м’яч мʼяч з'їзд з’їзд зʼїзд п'ять п’ять пʼять об'єкт об’єкт обʼєкт роз'яснення роз’яснення розʼяснення "
+        "сім'я сім’я сімʼя в'язати в’язати вʼязати здоров'я здоров’я здоровʼя пам'ять пам’ять памʼять "
+        "зв'язок зв’язок звʼязок під'їзд під’їзд підʼїзд сузір'я сузір’я сузірʼя бур'ян бур’ян бурʼян\n"
     )
     
-    sample_text = (isolated_upper * 50) + (isolated_lower * 50) + (ua_sample_words * 50) + (
+    sample_text = (isolated_upper * 50) + (isolated_lower * 50) + (isolated_apos * 100) + (ua_sample_words * 50) + (
         "Гетьман 2б — це високоефективна модель штучного інтелекту з гібридною архітектурою.\n"
         "28 шарів Gated DeltaNet забезпечують фіксований стан рекурентної пам'яті.\n"
         "6 шарів Global FlashAttention забезпечують точне асоціативне пригадування на 256k контексті.\n"
@@ -206,6 +212,12 @@ if __name__ == "__main__":
         enc = tok.encode(ch)
         assert len(enc.ids) == 1, f"Letter '{ch}' decomposed into {len(enc.ids)} tokens: {enc.tokens}!"
     print(f"      ✓ All 33 Ukrainian letters (upper & lower) verified as atomic 1-token characters!")
+
+    # Verify Ukrainian apostrophes (', ’, ʼ) are atomic 1-token characters
+    for apos in ["'", "’", "ʼ"]:
+        enc = tok.encode(apos)
+        assert len(enc.ids) == 1, f"Apostrophe '{apos}' decomposed into {len(enc.ids)} tokens: {enc.tokens}!"
+    print(f"      ✓ All Ukrainian apostrophes (', ’, ʼ) verified as atomic 1-token characters!")
 
     # Verify ChatML formatting roundtrip
     test_phrase = "<|im_start|>user\nПривіт, Гетьмане!<|im_end|>\n<|im_start|>assistant\n<think>\nПеревіряю стан.\n</think>\nЯ готовий до роботи!<|im_end|>"

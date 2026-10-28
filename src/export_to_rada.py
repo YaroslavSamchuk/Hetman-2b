@@ -85,8 +85,8 @@ def export_model_to_rada(model: HetmanForCausalLM, output_path: str, tokenizer_p
         shape = list(param_data.shape)
         
         # Decide quantization format:
-        # Note: continuous gates (alpha_proj, beta_proj, gate_proj, fusion_gate), W_expand, and V_shared must remain continuous FP16/BF16
-        is_continuous_gate = any(k in name for k in ["alpha_proj", "beta_proj", "gate_proj", "fusion_gate", "W_expand"])
+        # Note: continuous gates (alpha_proj, beta_proj, gate_proj, fusion_gate, branch_router), W_expand, and V_shared must remain continuous FP16/BF16
+        is_continuous_gate = any(k in name for k in ["alpha_proj", "beta_proj", "gate_proj", "fusion_gate", "branch_router", "W_expand"])
         is_ternary = (("proj.weight" in name and not is_continuous_gate) or 
                       ("C1" not in name and "C2" not in name and "W_expand" not in name and ".V" in name and "V_shared" not in name and "norm" not in name and "embed" not in name))
         

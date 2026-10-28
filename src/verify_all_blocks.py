@@ -71,7 +71,7 @@ def verify_block_1_config_and_parameters():
     hopfield_p = sum(p.numel() for p in full_model.model.hopfield_core.parameters())
     domain_p = sum(p.numel() for p in full_model.model.domain_backbone.parameters())
     hypo_p = sum(p.numel() for p in full_model.model.hypothesis_subnet.parameters())
-    fusion_p = sum(p.numel() for p in full_model.model.fusion_proj.parameters()) + sum(p.numel() for p in full_model.model.fusion_gate.parameters())
+    fusion_p = sum(p.numel() for p in full_model.model.fusion_proj.parameters()) + sum(p.numel() for p in full_model.model.branch_router.parameters())
     arbiter_p = sum(p.numel() for p in full_model.model.arbiter_layers.parameters())
     exit_p = sum(p.numel() for p in full_model.model.exit_layers.parameters())
     mtp_p = sum(p.numel() for p in full_model.mtp_head.parameters())
@@ -89,7 +89,7 @@ def verify_block_1_config_and_parameters():
     print(f"       - SLH-Core v2 (Hopfield):     {hopfield_p:,} params (V tensor: {full_model.model.hopfield_core.V.numel():,})")
     print(f"       - Domain Backbone (8L SwiGLU):{domain_p:,} params")
     print(f"       - Hypothesis Subnet (6L):     {hypo_p:,} params")
-    print(f"       - Fusion Gate & Projection:   {fusion_p:,} params")
+    print(f"       - Branch Router & Projection: {fusion_p:,} params")
     print(f"    -> Stage 3 Logic Arbiter (16L):  {arbiter_p:,} params")
     print(f"    -> Stage 4 Exit Stem (4L):       {exit_p:,} params")
     print(f"    -> MTP Auxiliary Head (Aux):     {mtp_p:,} params")
@@ -407,15 +407,19 @@ def verify_block_6_full_model_and_loss():
     ce_loss = outputs["ce_loss"]
     mtp_loss = outputs["mtp_loss"]
     hopfield_loss = outputs["hopfield_loss"]
+    ortho_loss = outputs["ortho_loss"]
 
     print(f"    - CE Loss (t+1):          {ce_loss.item():.4f}")
     print(f"    - MTP Loss (t+2):         {mtp_loss.item():.4f}")
     print(f"    - Hopfield Commit Loss:   {hopfield_loss.item():.4f}")
+    print(f"    - Orthogonality Loss:     {ortho_loss.item():.4f}")
     print(f"    - Total Composite Loss:   {loss.item():.4f}")
 
-    expected_composite = ce_loss + 0.3 * mtp_loss + 0.005 * hopfield_loss
+    ortho_weight = getattr(cfg, "hopfield_ortho_weight", 0.005)
+    expected_composite = ce_loss + 0.3 * mtp_loss + 0.005 * hopfield_loss + ortho_weight * ortho_loss
     assert abs(loss.item() - expected_composite.item()) < 1e-4, "Composite loss formula mismatch!"
     assert not torch.isnan(loss).any(), "NaN in full model loss!"
+    assert not torch.isnan(ortho_loss).any(), "NaN in orthogonality loss!"
 
     print("[*] Running backward pass...")
     loss.backward()

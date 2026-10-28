@@ -137,19 +137,5 @@
       "single_word": false,
       "special": true
     }
-  },
-  "additional_special_tokens": [
-    "</s>",
-    "<|im_start|>",
-    "<think>",
-    "</think>",
-    "<thought_summary>",
-    "</thought_summary>",
-    "<|call|>",
-    "<|return|>",
-    "<|extra_0|>",
-    "<|extra_1|>",
-    "<|extra_2|>",
-    "<|extra_3|>"
-  ]
+  }
 }

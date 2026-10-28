@@ -208,26 +208,84 @@ class MMapIndexedDataset:
             if num_records != self.total_sequences:
                 raise ValueError(f"Index count mismatch: header={self.total_sequences}, actual={num_records}")
                 
-        # Memory map the .idx table and .bin token array
-        self.index_mmap = np.memmap(
-            self.idx_path,
-            dtype=[
-                ("offset", "<u8"),
-                ("count", "<u4"),
-                ("source_crc", "<u4"),
-                ("split", "u1"),
-                ("pad", "V3")
-            ],
-            mode="r",
-            offset=HEADER_SIZE,
-            shape=(self.total_sequences,)
-        )
-        
-        self.bin_mmap = np.memmap(
-            self.bin_path,
-            dtype="<u4",
-            mode="r"
-        )
+        # Lazy initialization state: memmaps are opened on-demand per process
+        # to ensure zero IPC pickling overhead and complete safety with multi-worker DataLoader.
+        self._index_mmap = None
+        self._bin_mmap = None
+        self._init_pid = None
+
+    @property
+    def index_mmap(self):
+        self._ensure_open()
+        return self._index_mmap
+
+    @index_mmap.setter
+    def index_mmap(self, val):
+        self._index_mmap = val
+
+    @property
+    def bin_mmap(self):
+        self._ensure_open()
+        return self._bin_mmap
+
+    @bin_mmap.setter
+    def bin_mmap(self, val):
+        self._bin_mmap = val
+
+    def _ensure_open(self):
+        current_pid = os.getpid()
+        if self._index_mmap is None or self._bin_mmap is None or self._init_pid != current_pid:
+            self._index_mmap = np.memmap(
+                self.idx_path,
+                dtype=[
+                    ("offset", "<u8"),
+                    ("count", "<u4"),
+                    ("source_crc", "<u4"),
+                    ("split", "u1"),
+                    ("pad", "V3")
+                ],
+                mode="r",
+                offset=HEADER_SIZE,
+                shape=(self.total_sequences,)
+            )
+            self._bin_mmap = np.memmap(
+                self.bin_path,
+                dtype="<u4",
+                mode="r"
+            )
+            self._init_pid = current_pid
+
+    def __getstate__(self) -> Dict[str, Any]:
+        """Excludes open memmap objects from pickle payload for lightweight worker spawning."""
+        state = self.__dict__.copy()
+        state["_index_mmap"] = None
+        state["_bin_mmap"] = None
+        state["_init_pid"] = None
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]):
+        self.__dict__.update(state)
+        self._index_mmap = None
+        self._bin_mmap = None
+        self._init_pid = None
+
+    def close(self):
+        """Releases OS file mapping handles cleanly."""
+        if self._index_mmap is not None:
+            if hasattr(self._index_mmap, "_mmap") and self._index_mmap._mmap is not None:
+                try:
+                    self._index_mmap._mmap.close()
+                except Exception:
+                    pass
+            self._index_mmap = None
+        if self._bin_mmap is not None:
+            if hasattr(self._bin_mmap, "_mmap") and self._bin_mmap._mmap is not None:
+                try:
+                    self._bin_mmap._mmap.close()
+                except Exception:
+                    pass
+            self._bin_mmap = None
+        self._init_pid = None
 
     def __len__(self) -> int:
         return self.total_sequences
@@ -236,6 +294,7 @@ class MMapIndexedDataset:
         if idx < 0 or idx >= self.total_sequences:
             raise IndexError(f"Index {idx} out of range [0, {self.total_sequences})")
             
+        self._ensure_open()
         entry = self.index_mmap[idx]
         byte_offset = int(entry["offset"])
         token_count = int(entry["count"])
@@ -246,7 +305,8 @@ class MMapIndexedDataset:
         token_offset = byte_offset // 4
         tokens = self.bin_mmap[token_offset : token_offset + token_count]
         
-        # Build attention mask (1 for valid tokens, 0 for padding if remainder)
+        # Build attention mask and document boundary state_reset_mask:
+        # Resets DeltaNet recurrent state S_t = 0 at BOS tokens (id=1) and sequence start
         if token_count < self.sequence_length:
             padded_tokens = np.pad(
                 tokens,
@@ -256,13 +316,23 @@ class MMapIndexedDataset:
             )
             attention_mask = np.zeros(self.sequence_length, dtype=np.int64)
             attention_mask[:token_count] = 1
+            
+            resets = np.where((tokens == 1) | (np.arange(token_count) == 0), 0.0, 1.0).astype(np.float32)
+            state_reset_mask = np.pad(
+                resets,
+                (0, self.sequence_length - token_count),
+                mode="constant",
+                constant_values=0.0
+            )
         else:
             padded_tokens = tokens
             attention_mask = np.ones(self.sequence_length, dtype=np.int64)
+            state_reset_mask = np.where((tokens == 1) | (np.arange(self.sequence_length) == 0), 0.0, 1.0).astype(np.float32)
             
         return {
             "input_ids": padded_tokens,
             "attention_mask": attention_mask,
+            "state_reset_mask": state_reset_mask,
             "token_count": token_count,
             "source_crc": source_crc,
             "split": INV_SPLIT_MAP.get(split_code, "unknown")
@@ -787,13 +857,13 @@ def run_dataset_builder_verification():
     seq1 = b_dataset[1] # Source B
     seq2 = b_dataset[2] # Source B remainder
     
-    # Sequence 0 must be 100% source A (tokens=100)
+    # Sequence 0 must be 100% source A (tokens=100 with BOS=1, EOS=5)
     assert seq0["source_crc"] == zlib.crc32(b"source_A")
-    assert all(tok in (100, 5) for tok in seq0["input_ids"][:4096]), "Source A sequence contaminated!"
+    assert all(tok in (1, 100, 5) for tok in seq0["input_ids"][:4096]), "Source A sequence contaminated!"
     
-    # Sequence 1 must be 100% source B (tokens=200, NOT polluted by source A's leftover 904 tokens!)
+    # Sequence 1 must be 100% source B (tokens=200 with BOS=1, EOS=5, NOT polluted by source A's leftover 904 tokens!)
     assert seq1["source_crc"] == zlib.crc32(b"source_B")
-    assert all(tok in (200, 5) for tok in seq1["input_ids"][:4096]), "Source B sequence contaminated with Source A leftover!"
+    assert all(tok in (1, 200, 5) for tok in seq1["input_ids"][:4096]), "Source B sequence contaminated with Source A leftover!"
     
     # Sequence 2 must be remainder with count=512
     assert seq2["source_crc"] == zlib.crc32(b"source_B")

@@ -103,6 +103,11 @@ def compute_chunked_deltanet_scan_jax(
     else:
         L_padded = L
 
+    # Ensure key normalization for Gated DeltaNet spectral stability: ||k||_2 = 1.0
+    # Strictly guarantees all eigenvalues of (a*I - b*k*k^T) remain in (-1, 1), preventing NaN overflow in associative scan
+    k_norm = jnp.maximum(jnp.linalg.norm(k, axis=-1, keepdims=True), 1e-5)
+    k = k / k_norm
+
     num_chunks = L_padded // chunk_size
 
     # Reshape inputs into chunks: [num_chunks, B, chunk_size, H, D]

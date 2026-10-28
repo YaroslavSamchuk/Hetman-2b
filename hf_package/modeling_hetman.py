@@ -25,6 +25,7 @@ class HetmanCausalLMOutput:
     ce_loss: Optional[torch.Tensor] = None
     mtp_loss: Optional[torch.Tensor] = None
     hopfield_loss: Optional[torch.Tensor] = None
+    ortho_loss: Optional[torch.Tensor] = None
     past_states: Optional[Any] = None
 
     def __getitem__(self, item):
@@ -282,11 +283,11 @@ class HetmanModel(HetmanPreTrainedModel):
             HetmanLayer(config, is_global=(i == 5), yarn_cooling=1.8) for i in range(6)
         ])
         
-        # Adaptive Dynamic Fusion Gate (3 * 1536 -> 1536)
-        self.fusion_gate = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # 3-Way Softmax Branch Competition Router (Declarative vs Procedural Separation)
+        self.branch_router = nn.Linear(config.hidden_size, 3, bias=False)
         self.fusion_proj = BitLinear(3 * config.hidden_size, config.hidden_size, bias=False)
         self.fusion_norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        
+
         # Stage 3: Verified Logic Arbiter (16 Layers: 12 DeltaNet + 4 Global at layers 4, 8, 12, 16)
         # Cooling: 2.0 for L4-L8 (idx 3, 7), 2.4 for L12-L16 (idx 11, 15)
         arbiter_list = []
@@ -315,7 +316,7 @@ class HetmanModel(HetmanPreTrainedModel):
         attention_mask: Optional[torch.Tensor] = None,
         state_reset_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, List[Any]]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, List[Any]]]:
         B, L = input_ids.shape
         x = self.embed_tokens(input_ids)
 
@@ -357,10 +358,24 @@ class HetmanModel(HetmanPreTrainedModel):
             y_hypo, st = layer(y_hypo, prev_state=prev_st, offset=offset, mask=attention_mask, state_reset_mask=state_reset_mask, position_ids=position_ids)
             new_states["hypo"].append(st)
             
+        # 3-Way Softmax Branch Competition Router: [g_know, g_domain, g_hypo]
+        router_logits = self.branch_router(x_stem)  # [B, L, 3]
+        router_gates = F.softmax(router_logits, dim=-1)  # [B, L, 3]
+        g_know = router_gates[..., 0:1]     # [B, L, 1]
+        g_domain = router_gates[..., 1:2]   # [B, L, 1]
+        g_hypo = router_gates[..., 2:3]     # [B, L, 1]
+        
+        # Modulate the three branches by their respective dynamic gates
+        y_know_gated = y_know * g_know
+        y_domain_gated = y_domain * g_domain
+        y_hypo_gated = y_hypo * g_hypo
+        
         # Adaptive Fusion
-        y_triad = torch.cat([y_know, y_domain, y_hypo], dim=-1)
-        gate = torch.sigmoid(self.fusion_gate(x_stem))
-        x_fused = self.fusion_norm(x_stem + self.fusion_proj(y_triad) * gate)
+        y_triad = torch.cat([y_know_gated, y_domain_gated, y_hypo_gated], dim=-1)
+        x_fused = self.fusion_norm(x_stem + self.fusion_proj(y_triad))
+
+        # Disentanglement / Orthogonality loss term:
+        ortho_loss = (F.cosine_similarity(y_know, y_domain + y_hypo, dim=-1) ** 2).mean()
         
         # 3. Stage 3: Logic Arbiter (16 layers: 12 DeltaNet + 4 Global Attention)
         x_arb = x_fused
@@ -378,7 +393,11 @@ class HetmanModel(HetmanPreTrainedModel):
             new_states["exit"].append(st)
             
         x_out = self.final_norm(x_exit)
-        return x_out, hopfield_loss, new_states
+        return x_out, hopfield_loss, ortho_loss, new_states
+
+    @property
+    def fusion_gate(self):
+        return self.branch_router
 
 class HetmanForCausalLM(HetmanPreTrainedModel):
     def __init__(self, config: HetmanConfig):
@@ -404,7 +423,7 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
         state_reset_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None
     ) -> Dict[str, Any]:
-        hidden_states, hopfield_loss, new_states = self.model(
+        hidden_states, hopfield_loss, ortho_loss, new_states = self.model(
             input_ids,
             past_states=past_states,
             offset=offset,
@@ -448,8 +467,9 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
             else:
                 mtp_loss = torch.tensor(0.0, device=input_ids.device)
                 
-            # Composite loss: CE + 0.3 * MTP + 0.005 * Hopfield commitment
-            loss = ce_loss + 0.3 * mtp_loss + 0.005 * hopfield_loss
+            # Composite loss: CE + 0.3 * MTP + 0.005 * Hopfield commitment + hopfield_ortho_weight * Orthogonality
+            hopfield_ortho_weight = getattr(self.config, "hopfield_ortho_weight", 0.005)
+            loss = ce_loss + 0.3 * mtp_loss + 0.005 * hopfield_loss + hopfield_ortho_weight * ortho_loss
             
         return HetmanCausalLMOutput(
             loss=loss,
@@ -457,6 +477,7 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
             ce_loss=ce_loss,
             mtp_loss=mtp_loss,
             hopfield_loss=hopfield_loss,
+            ortho_loss=ortho_loss,
             past_states=new_states
         )
 

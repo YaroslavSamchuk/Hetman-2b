@@ -39,6 +39,7 @@ class HetmanConfig(PretrainedConfig):
         hopfield_beta: float = 0.1767767,
         hopfield_pid_ki: float = 0.01,
         hopfield_pid_kd: float = 0.005,
+        hopfield_ortho_weight: float = 0.005,
         hadamard_block_size: int = 512,
         swiglu_limit: float = 10.0,
         logit_softcap: float = 30.0,
@@ -74,6 +75,7 @@ class HetmanConfig(PretrainedConfig):
         self.hopfield_beta = hopfield_beta
         self.hopfield_pid_ki = hopfield_pid_ki
         self.hopfield_pid_kd = hopfield_pid_kd
+        self.hopfield_ortho_weight = hopfield_ortho_weight
         self.hadamard_block_size = hadamard_block_size
         self.swiglu_limit = swiglu_limit
         self.logit_softcap = logit_softcap

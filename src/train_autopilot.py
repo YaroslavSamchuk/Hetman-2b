@@ -358,11 +358,17 @@ def run_autopilot(args):
         status="START"
     )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[*] Initializing model on device: {device}")
+    # Device detection with PyTorch/XLA support for Cloud TPU VMs
+    try:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        print(f"[*] Detected PyTorch/XLA TPU device: {device}")
+    except (ImportError, RuntimeError):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"[*] Initializing model on device: {device}")
     model = HetmanForCausalLM(hetman_config).to(device)
 
-    # Multi-parameter group optimizer (BitNet & SLH-Core standard: no decay on norms, biases, codebooks)
+    # Multi-parameter group optimizer (BitNet & SLH-Core standard: no decay on norms, biases, codebooks, QK-gains)
     bitlinear_lr = sched_cfg.get("optimizer_parameter_groups", {}).get("bitlinear_ternary_lr", sched_cfg.get("peak_learning_rate", 0.0018))
     dense_lr = sched_cfg.get("optimizer_parameter_groups", {}).get("dense_embeddings_hopfield_lr", 0.0003)
 
@@ -372,9 +378,11 @@ def run_autopilot(args):
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if param.ndim <= 1 or "norm" in name.lower() or "bias" in name.lower() or "hopfield" in name.lower():
+        if (param.ndim <= 1 or "norm" in name.lower() or "bias" in name.lower() or 
+            "hopfield" in name.lower() or "gamma" in name.lower() or "scale" in name.lower() or
+            "rotary" in name.lower()):
             no_decay_params.append(param)
-        elif "embed" in name.lower() or "lm_head" in name.lower() or "fusion" in name.lower():
+        elif "embed" in name.lower() or "lm_head" in name.lower() or "fusion" in name.lower() or "router" in name.lower():
             dense_decay.append(param)
         else:
             bitlinear_decay.append(param)
@@ -456,7 +464,12 @@ def run_autopilot(args):
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), sched_cfg.get("gradient_clip_norm", 1.0))
-            optimizer.step()
+            if "xla" in str(device).lower():
+                import torch_xla.core.xla_model as xm
+                xm.optimizer_step(optimizer)
+                xm.mark_step()
+            else:
+                optimizer.step()
 
             step_loss = float(loss.item())
             tokens_done += sched_cfg.get("global_batch_size_tokens", 4194304) if not args.dry_run else (B * L)

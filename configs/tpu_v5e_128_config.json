@@ -71,7 +71,9 @@
     "chips": 128,
     "sharding_mesh": {
       "data": 32,
-      "model": 4
+      "model": 4,
+      "phase_2_256k_data": 16,
+      "phase_2_256k_model": 8
     },
     "hbm_total_gb": 2048,
     "estimated_training_days": 16.52,

@@ -105,8 +105,10 @@ def run_tests():
     dummy_tokens = torch.randint(0, 256, (2, 16))
     out = mini_model(dummy_tokens, labels=dummy_tokens)
     assert out["loss"] is not None
+    assert out["ortho_loss"] is not None
     assert not torch.isnan(out["loss"]).any(), "NaN in Composite Loss!"
-    print(f"      ✓ Composite Loss: CE={out['ce_loss'].item():.3f} + 0.3*MTP={out['mtp_loss'].item():.3f} + 0.005*Hopfield={out['hopfield_loss'].item():.3f} -> Total={out['loss'].item():.3f}")
+    assert not torch.isnan(out["ortho_loss"]).any(), "NaN in Ortho Loss!"
+    print(f"      ✓ Composite Loss: CE={out['ce_loss'].item():.3f} + 0.3*MTP={out['mtp_loss'].item():.3f} + 0.005*Hopfield={out['hopfield_loss'].item():.3f} + 0.005*Ortho={out['ortho_loss'].item():.3f} -> Total={out['loss'].item():.3f}")
     
     # Test autoregressive generate() on mini model
     gen_tokens = mini_model.generate(dummy_tokens[:, :4], max_new_tokens=4, temperature=0.7)

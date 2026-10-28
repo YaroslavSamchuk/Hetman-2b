@@ -36,6 +36,7 @@ class HetmanConfig:
     hopfield_beta: float = 0.1767767     # 1 / sqrt(32) soft-attractor temperature
     hopfield_pid_ki: float = 0.01        # Aux-Loss-Free PID dynamic bias integral gain
     hopfield_pid_kd: float = 0.005       # Aux-Loss-Free PID dynamic bias derivative gain
+    hopfield_ortho_weight: float = 0.005 # Declarative (Hopfield) vs Procedural (Logic) orthogonality loss weight
     
     # Blockwise Fast Walsh-Hadamard Transform (FWHT) & Outlier Suppression
     hadamard_block_size: int = 512

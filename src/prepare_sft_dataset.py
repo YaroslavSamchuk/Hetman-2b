@@ -13,6 +13,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from tokenizers import Tokenizer
 
+import json
+
 # Canonical ChatML Special Token IDs
 IM_START_ID = 4       # <|im_start|>
 IM_END_ID = 5         # <|im_end|>
@@ -56,10 +58,21 @@ def sanitize_and_normalize_conversation(
     clean_turns = []
 
     for msg in messages:
-        raw_role = msg.get("role", "").strip().lower()
-        content = msg.get("content", "").strip()
-        # Normalize Ukrainian apostrophe variants (ʼ, ’, `) to standard ASCII quote '
-        content = re.sub(r"[\u02BC\u2019\u0060]", "'", content)
+        raw_role = msg.get("role", "")
+        raw_role = raw_role.strip().lower() if isinstance(raw_role, str) else ""
+        raw_content = msg.get("content", "")
+        if isinstance(raw_content, (dict, list)):
+            content = json.dumps(raw_content, ensure_ascii=False)
+        elif raw_content is None:
+            content = ""
+        else:
+            content = str(raw_content).strip()
+
+        # Context-aware apostrophe normalization: only inside Ukrainian words!
+        # Preserves backticks (`) and triple backticks (```) for Markdown and code!
+        ukr_char_class = r"[а-яА-ЯіїєґІЇЄҐa-zA-Z0-9]"
+        apostrophe_class = r"[\u02BC\u2019\u2018\u0060\u00B4\u02B9\u2032]"
+        content = re.sub(rf"(?<={ukr_char_class}){apostrophe_class}(?={ukr_char_class})", "'", content)
         role = ROLE_ALIASES.get(raw_role)
         
         if not role or not content:
@@ -147,29 +160,37 @@ def tokenize_and_mask_chatml(
 
     last_asst_idx = max((i for i, m in enumerate(messages) if m["role"] == "assistant"), default=-1)
 
-    all_input_ids: List[int] = []
-    all_labels: List[int] = []
-
+    # Left-truncate older conversational history if turns exceed max_length,
+    # ensuring system prompt (index 0) and final assistant response are strictly preserved.
+    encoded_turns = []
+    total_token_len = 0
+    
     for idx, msg in enumerate(messages):
         role = msg["role"]
         content = msg["content"]
         
         prefix = f"<|im_start|>{role}\n"
+        if role == "tool":
+            # Format tool return explicitly with <|return|> special token
+            tool_content = content if "<|return|>" in content else f"<|return|>{content}<|return|>"
+            content_encoded = tokenizer.encode(tool_content).ids
+        else:
+            content_encoded = tokenizer.encode(content).ids
+            
         prefix_ids = tokenizer.encode(prefix).ids
-        content_ids = tokenizer.encode(content).ids
         suffix_ids = tokenizer.encode("<|im_end|>\n").ids
-        turn_ids = prefix_ids + content_ids + suffix_ids
+        turn_ids = prefix_ids + content_encoded + suffix_ids
         
         if role == "assistant":
             # Prefix (<|im_start|>assistant\n) is masked; content and suffix are active targets
-            turn_labels = ([IGNORE_INDEX] * len(prefix_ids)) + list(content_ids) + suffix_ids
+            turn_labels = ([IGNORE_INDEX] * len(prefix_ids)) + list(content_encoded) + suffix_ids
             # Historical turn without tool calling: mask if supervise_only_last_turn is active
             if supervise_only_last_turn and idx != last_asst_idx and "<|call|>" not in content:
                 turn_labels = [IGNORE_INDEX] * len(turn_ids)
             else:
                 # If thought summary tags exist in historical turns, mask them so model never trains on summaries
                 in_summary = False
-                for t_idx, tid in enumerate(content_ids):
+                for t_idx, tid in enumerate(content_encoded):
                     if tid == 8: # RADA_TOKEN_THOUGHT_SUMMARY (<thought_summary>)
                         in_summary = True
                         turn_labels[len(prefix_ids) + t_idx] = IGNORE_INDEX
@@ -181,6 +202,26 @@ def tokenize_and_mask_chatml(
         else:
             turn_labels = [IGNORE_INDEX] * len(turn_ids)
             
+        encoded_turns.append((turn_ids, turn_labels))
+        total_token_len += len(turn_ids)
+
+    # If exceeding max_length, drop oldest conversation turns (preserving system turn 0 and final assistant turns)
+    if total_token_len > max_length:
+        has_system = len(messages) > 0 and messages[0]["role"] == "system"
+        sys_turn = [encoded_turns[0]] if has_system else []
+        history_turns = encoded_turns[1:] if has_system else encoded_turns
+        
+        # Keep trimming oldest turns from the left until length fits or only the final target turn remains
+        while history_turns and (sum(len(t[0]) for t in sys_turn) + sum(len(t[0]) for t in history_turns)) > max_length:
+            if len(history_turns) <= 1:
+                break
+            history_turns.pop(0)
+            
+        encoded_turns = sys_turn + history_turns
+
+    all_input_ids: List[int] = []
+    all_labels: List[int] = []
+    for turn_ids, turn_labels in encoded_turns:
         all_input_ids.extend(turn_ids)
         all_labels.extend(turn_labels)
 
@@ -232,11 +273,15 @@ def pack_dialogues_for_sft(
                 current_segments.extend([0] * pad_len)
                 current_resets.extend([0.0] * pad_len)
                 
+            seg_tensor = torch.tensor(current_segments, dtype=torch.long)
+            attn_mask = create_block_diagonal_causal_mask(seg_tensor)
+            
             packed_batches.append({
                 "input_ids": torch.tensor(current_inputs, dtype=torch.long),
                 "labels": torch.tensor(current_labels, dtype=torch.long),
                 "position_ids": torch.tensor(current_positions, dtype=torch.long),
-                "segment_ids": torch.tensor(current_segments, dtype=torch.long),
+                "segment_ids": seg_tensor,
+                "attention_mask": attn_mask,
                 "state_reset_mask": torch.tensor(current_resets, dtype=torch.float32)
             })
             current_inputs, current_labels = [], []
@@ -264,11 +309,15 @@ def pack_dialogues_for_sft(
             current_segments.extend([0] * pad_len)
             current_resets.extend([0.0] * pad_len)
             
+        seg_tensor = torch.tensor(current_segments, dtype=torch.long)
+        attn_mask = create_block_diagonal_causal_mask(seg_tensor)
+        
         packed_batches.append({
             "input_ids": torch.tensor(current_inputs, dtype=torch.long),
             "labels": torch.tensor(current_labels, dtype=torch.long),
             "position_ids": torch.tensor(current_positions, dtype=torch.long),
-            "segment_ids": torch.tensor(current_segments, dtype=torch.long),
+            "segment_ids": seg_tensor,
+            "attention_mask": attn_mask,
             "state_reset_mask": torch.tensor(current_resets, dtype=torch.float32)
         })
 
@@ -279,19 +328,31 @@ def create_block_diagonal_causal_mask(segment_ids: torch.Tensor) -> torch.Tensor
     Creates a 2D or 3D Block-Diagonal Causal Document Attention Mask:
     Prevents cross-sample attention contamination in Global FlashAttention.
     Supports both 1D [L] and 2D [B, L] inputs.
+    Guarantees padding diagonal is True to prevent all-False softmax rows (which cause NaNs in SDPA).
     """
     if segment_ids.dim() == 1:
         L = segment_ids.shape[0]
         causal_mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device=segment_ids.device))
         same_segment = segment_ids.unsqueeze(1) == segment_ids.unsqueeze(0)
         non_pad = segment_ids.unsqueeze(1) > 0
-        return causal_mask & same_segment & non_pad
+        mask = causal_mask & same_segment & non_pad
+        # Set diagonal to True for pad tokens so no row is entirely masked out (prevents NaNs)
+        pad_positions = (segment_ids == 0)
+        if pad_positions.any():
+            diag_idx = torch.arange(L, device=segment_ids.device)
+            mask[diag_idx, diag_idx] = mask[diag_idx, diag_idx] | pad_positions
+        return mask
     elif segment_ids.dim() == 2:
         B, L = segment_ids.shape
         causal_mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device=segment_ids.device)).unsqueeze(0)
         same_segment = segment_ids.unsqueeze(2) == segment_ids.unsqueeze(1)
         non_pad = segment_ids.unsqueeze(2) > 0
-        return causal_mask & same_segment & non_pad
+        mask = causal_mask & same_segment & non_pad
+        pad_positions = (segment_ids == 0)
+        if pad_positions.any():
+            diag_idx = torch.arange(L, device=segment_ids.device)
+            mask[:, diag_idx, diag_idx] = mask[:, diag_idx, diag_idx] | pad_positions
+        return mask
     else:
         raise ValueError(f"segment_ids must be 1D or 2D, got shape {segment_ids.shape}")
 
