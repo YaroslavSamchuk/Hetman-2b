@@ -87,7 +87,3 @@ bash scripts/launch_hetman_train.sh
 ```
 
 Run a bounded hardware acceptance test before attempting a longer run. The launcher is not evidence that the model will fit, converge, or meet a particular schedule on a given node.
-
-## License
-
-There is currently no `LICENSE` file in this repository, so reuse and redistribution terms have not been declared. Do not treat the earlier Apache 2.0 badge or statements as a valid license grant. Select and add a license before making an open-source commitment or distributing the code or model artifacts.
