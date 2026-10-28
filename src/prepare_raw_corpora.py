@@ -136,7 +136,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path(CONFIG_FILE_PATH))
     parser.add_argument("--data-root", default=None, help="Corpus root containing one directory per corpus ID; defaults to HETMAN_DATA_ROOT or project data/raw")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("audit", help="List local corpus readiness without accessing the network")
+    audit = sub.add_parser("audit", help="List local corpus readiness without accessing the network")
+    audit.add_argument("--strict", action="store_true", help="Exit with status 2 when any configured corpus is missing")
     download = sub.add_parser("download", help="Stream one configured HF dataset into normalized JSONL")
     download.add_argument("--corpus", action="append", required=True, help="Configured corpus ID; repeat to export more than one")
     download.add_argument("--split", default="train")
@@ -151,8 +152,8 @@ def main() -> int:
     args = parse_args()
     config = load_pilot_config(str(args.config))
     if args.command == "audit":
-        print_inventory(config, args.data_root)
-        return 0
+        ready = print_inventory(config, args.data_root)
+        return 0 if ready or not args.strict else 2
 
     if not args.confirm_download:
         raise SystemExit("Download not started. Re-run with --confirm-download after reviewing the configured dataset and output paths.")

@@ -31,6 +31,15 @@ def test_inventory_audit():
     assert ready is False, "Expected inventory to be not ready initially"
     print("    [PASS] Inventory audit completed cleanly.")
 
+    import sys
+    original_argv = sys.argv
+    try:
+        sys.argv = ["prepare_raw_corpora.py", "audit", "--strict"]
+        assert main() == 2, "Strict inventory audit should fail when required corpora are missing"
+    finally:
+        sys.argv = original_argv
+    print("    [PASS] Strict inventory audit returns a failure status when corpora are missing.")
+
 
 def test_normalize_row():
     print("\n[2] Testing row normalization, SHA-256 ID fallback, and empty text handling...")

@@ -53,7 +53,7 @@ def audit_corpus_paths(config: Dict[str, Any], root_override: Optional[str] = No
             if os.path.isdir(effective_path):
                 for root, _, files in os.walk(effective_path):
                     for f in files:
-                        if f.endswith((".jsonl", ".parquet", ".txt", ".json")):
+                        if f.endswith((".jsonl", ".jsonl.gz", ".parquet", ".txt")):
                             file_count += 1
                             total_size_bytes += os.path.getsize(os.path.join(root, f))
             else:

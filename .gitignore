@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # Virtual environments
 venv/
@@ -21,6 +24,13 @@ ENV/
 checkpoints/
 orbax_checkpoints/
 data/
+datasets/
+corpora/
+raw_data/
+processed_data/
+models/
+weights/
+outputs/
 *.idx
 *.partial
 
@@ -29,7 +39,18 @@ data/
 logs/
 wandb/
 runs/
+lightning_logs/
 .ipynb_checkpoints/
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+configs/local*.json
 
 # IDE & OS
 .vscode/

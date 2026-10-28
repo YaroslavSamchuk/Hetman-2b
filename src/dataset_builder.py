@@ -23,9 +23,9 @@ except ImportError:
     Tokenizer = None
 
 try:
-    from src.data_curation_pipeline import DataCurationPipeline, DocumentMetadata
+    from src.data_curation_pipeline import DataCurationPipeline, DecontaminationAuditor, DocumentMetadata
 except ImportError:
-    from data_curation_pipeline import DataCurationPipeline, DocumentMetadata
+    from data_curation_pipeline import DataCurationPipeline, DecontaminationAuditor, DocumentMetadata
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -169,6 +169,12 @@ class BinaryShardWriter:
             "idx_size_bytes": idx_size
         }
 
+    def abort(self) -> None:
+        """Close incomplete shard files without writing a valid-looking header."""
+        for handle in (self.bin_file, self.idx_file):
+            if not handle.closed:
+                handle.close()
+
 
 # ==============================================================================
 # 3. MEMORY-MAPPED DATASET READER (ZERO-COPY O(1) ACCESS)
@@ -189,6 +195,8 @@ class MMapIndexedDataset:
         # Read .idx header
         with open(self.idx_path, "rb") as f:
             header_bytes = f.read(HEADER_SIZE)
+            if len(header_bytes) != HEADER_SIZE:
+                raise ValueError("Index file is shorter than its header")
             magic, version, dtype_code, self.sequence_length, self.total_sequences, self.total_tokens, _ = struct.unpack(
                 "<14sHHIQQ26s",
                 header_bytes
@@ -207,6 +215,30 @@ class MMapIndexedDataset:
             num_records = len(idx_records_bytes) // INDEX_RECORD_SIZE
             if num_records != self.total_sequences:
                 raise ValueError(f"Index count mismatch: header={self.total_sequences}, actual={num_records}")
+
+            if self.sequence_length < 2:
+                raise ValueError("Shard sequence length must be at least two tokens")
+            if self.total_sequences:
+                index_dtype = np.dtype([
+                    ("offset", "<u8"), ("count", "<u4"), ("source_crc", "<u4"),
+                    ("split", "u1"), ("pad", "V3")
+                ])
+                records = np.frombuffer(idx_records_bytes, dtype=index_dtype)
+                counts = records["count"].astype(np.uint64, copy=False)
+                offsets = records["offset"]
+                if np.any(counts < 2) or np.any(counts > self.sequence_length):
+                    raise ValueError("Index contains an invalid sequence token count")
+                expected_offsets = np.concatenate((np.zeros(1, dtype=np.uint64), np.cumsum(counts[:-1], dtype=np.uint64) * 4))
+                if not np.array_equal(offsets, expected_offsets):
+                    raise ValueError("Index sequence offsets are not contiguous")
+                if int(counts.sum(dtype=np.uint64)) != self.total_tokens:
+                    raise ValueError("Index token total disagrees with its header")
+                if np.any(~np.isin(records["split"], tuple(SPLIT_MAP.values()))):
+                    raise ValueError("Index contains an unsupported split tag")
+
+        bin_size = os.path.getsize(self.bin_path)
+        if bin_size % 4 or bin_size // 4 != self.total_tokens:
+            raise ValueError("Binary shard size does not match the index token total")
                 
         # Lazy initialization state: memmaps are opened on-demand per process
         # to ensure zero IPC pickling overhead and complete safety with multi-worker DataLoader.
@@ -486,6 +518,7 @@ class DatasetRecipeBuilder:
             )
         with open(config_path, "r", encoding="utf-8") as f:
             self.config = json.load(f)
+        self.config_path = os.path.abspath(config_path)
             
         val_cfg = self.config.get("validation_split", {})
         self.splitter = DocumentSplitter(
@@ -494,6 +527,37 @@ class DatasetRecipeBuilder:
         )
         self.target_tokens = int(self.config.get("total_tokens_per_recipe", 200_000_000))
         self.seq_len = int(self.config.get("sequence_length", 4096))
+
+    def _load_benchmark_entries(self) -> List[Dict[str, str]]:
+        settings = self.config.get("benchmark_decontamination", {})
+        if not settings.get("required", False):
+            return []
+        configured_path = settings.get("prompt_file")
+        if not configured_path:
+            raise ValueError("benchmark_decontamination.required is true but prompt_file is not configured")
+        path = configured_path if os.path.isabs(configured_path) else os.path.join(PROJECT_ROOT, configured_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"Required benchmark prompt file is missing: {path}. Add the approved evaluation prompts "
+                "before building any recipe that claims benchmark decontamination."
+            )
+        entries: List[Dict[str, str]] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line_number, line in enumerate(f, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid benchmark JSONL at {path}:{line_number}: {exc}") from exc
+                if not isinstance(entry, dict):
+                    raise ValueError(f"Benchmark entry at {path}:{line_number} must be a JSON object")
+                if not isinstance(entry.get("benchmark"), str) or not isinstance(entry.get("prompt"), str):
+                    raise ValueError(f"Benchmark entry at {path}:{line_number} requires string benchmark and prompt fields")
+                entries.append(entry)
+        if not entries:
+            raise ValueError(f"Required benchmark prompt file contains no entries: {path}")
+        return entries
 
     def get_corpus_iterator(
         self,
@@ -531,9 +595,10 @@ class DatasetRecipeBuilder:
         
         files_to_read = []
         if os.path.isdir(effective_path):
-            for root, _, files in os.walk(effective_path):
+            for root, dirs, files in os.walk(effective_path):
+                dirs.sort()
                 for f in sorted(files):
-                    if f.endswith((".jsonl", ".parquet", ".txt", ".json", ".jsonl.gz")):
+                    if f.endswith((".jsonl", ".parquet", ".txt", ".jsonl.gz")):
                         files_to_read.append(os.path.join(root, f))
         else:
             files_to_read.append(effective_path)
@@ -566,33 +631,39 @@ class DatasetRecipeBuilder:
                         }
             elif file_path.endswith(".parquet"):
                 import pyarrow.parquet as pq
-                table = pq.read_table(file_path)
-                df = table.to_pandas()
-                for _, row in df.iterrows():
-                    text = str(row.get(text_col, ""))
-                    if not text:
-                        continue
-                    doc_id = str(row.get("id", f"{corpus_id}_{doc_counter:08d}"))
-                    doc_counter += 1
-                    yield {
-                        "id": doc_id,
-                        "source": corpus_id,
-                        "type": doc_type,
-                        "license": license_str,
-                        "text": text
-                    }
-            elif file_path.endswith(".txt"):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    if content.strip():
+                parquet_file = pq.ParquetFile(file_path)
+                available_columns = set(parquet_file.schema.names)
+                columns = [c for c in (text_col, "id") if c in available_columns]
+                if text_col not in columns:
+                    raise ValueError(f"Parquet corpus '{corpus_id}' has no configured text column '{text_col}'")
+                for batch in parquet_file.iter_batches(batch_size=2048, columns=columns):
+                    values = batch.to_pydict()
+                    texts = values[text_col]
+                    ids = values.get("id", [None] * len(texts))
+                    for text_value, id_value in zip(texts, ids):
+                        if not isinstance(text_value, str) or not text_value.strip():
+                            continue
+                        doc_id = str(id_value or f"{corpus_id}_{doc_counter:08d}")
                         doc_counter += 1
                         yield {
-                            "id": f"{corpus_id}_{doc_counter:08d}",
+                            "id": doc_id,
                             "source": corpus_id,
                             "type": doc_type,
                             "license": license_str,
-                            "text": content
+                            "text": text_value
                         }
+            elif file_path.endswith(".txt"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for content in f:
+                        if content.strip():
+                            doc_counter += 1
+                            yield {
+                                "id": f"{corpus_id}_{doc_counter:08d}",
+                                "source": corpus_id,
+                                "type": doc_type,
+                                "license": license_str,
+                                "text": content.strip()
+                            }
 
     def verify_val_train_isolation(
         self,
@@ -649,7 +720,9 @@ class DatasetRecipeBuilder:
                     for word in txt.split()
                 ]
             
-        pipeline = DataCurationPipeline() if curation_applied else None
+        benchmark_entries = self._load_benchmark_entries()
+        decontam = DecontaminationAuditor(benchmark_entries) if benchmark_entries else None
+        pipeline = DataCurationPipeline(benchmark_entries=benchmark_entries) if curation_applied else None
         
         os.makedirs(output_dir, exist_ok=True)
         train_writer = BinaryShardWriter(os.path.join(output_dir, f"{recipe_id}_train"), sequence_length=self.seq_len)
@@ -699,7 +772,7 @@ class DatasetRecipeBuilder:
                     
                     if assigned_split == "val":
                         # Check benchmark decontamination on validation
-                        if pipeline and pipeline.decontam.check_contamination(doc_text)[0]:
+                        if decontam and decontam.check_contamination(doc_text)[0]:
                             continue
                         clean_val, _ = pipeline.normalizer.normalize(doc_text, doc_type=raw_doc.get("type", "general_web")) if pipeline else (doc_text, {})
                         val_hashes[hashlib.sha256(clean_val.encode("utf-8")).hexdigest()] = doc_id
@@ -733,8 +806,8 @@ class DatasetRecipeBuilder:
                             
                 # Finish source with strict boundary isolation
                 train_src_stats = train_packer.finish_source(
-                    emit_remainder=is_last_source,
-                    remainder_token_count=512 if is_last_source else 0,
+                    emit_remainder=is_last_source and self.target_tokens % self.seq_len > 0,
+                    remainder_token_count=(self.target_tokens % self.seq_len) if is_last_source else 0,
                     allow_incomplete=bool(mock_corpora)
                 )
                 val_src_stats = val_packer.finish_source(
@@ -749,16 +822,22 @@ class DatasetRecipeBuilder:
                     "train_sequences_emitted": train_src_stats["emitted_sequences"],
                     "val_sequences_emitted": val_src_stats["emitted_sequences"]
                 }
+            # Verify cross-split isolation before finalizing shard headers.
+            is_isolated, collisions = self.verify_val_train_isolation(train_hashes, val_hashes)
+            if not is_isolated:
+                raise RuntimeError(f"Detected {collisions} leaking documents between train and validation pools!")
+
+            train_stats = train_writer.close()
+            val_stats = val_writer.close()
+        except BaseException:
+            train_writer.abort()
+            val_writer.abort()
+            raise
         finally:
+            active_iterator = locals().get("doc_iter")
+            if active_iterator is not None and hasattr(active_iterator, "close"):
+                active_iterator.close()
             manifest_file.close()
-            
-        # Verify cross-split isolation
-        is_isolated, collisions = self.verify_val_train_isolation(train_hashes, val_hashes)
-        if not is_isolated:
-            raise RuntimeError(f"Detected {collisions} leaking documents between train and validation pools!")
-            
-        train_stats = train_writer.close()
-        val_stats = val_writer.close()
         
         result_stats = {
             "recipe_id": recipe_id,

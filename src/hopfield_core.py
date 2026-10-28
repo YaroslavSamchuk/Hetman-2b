@@ -77,7 +77,11 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             # Initialize shared anchor attractors
             self.V_shared.normal_(mean=0.0, std=1.0 / math.sqrt(self.expanded_dim))
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        valid_token_mask: torch.Tensor | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         x: [B, L, hidden_size]
         Returns:
@@ -85,6 +89,13 @@ class SpeculativeLatentHopfieldCore(nn.Module):
             aux_loss: commitment regularization loss (with Aux-Loss-Free PID routing)
         """
         B, L, _ = x.shape
+        if valid_token_mask is None:
+            valid_token_mask = torch.ones((B, L), device=x.device, dtype=torch.float32)
+        else:
+            if valid_token_mask.shape != (B, L):
+                raise ValueError(f"valid_token_mask must have shape {(B, L)}, got {tuple(valid_token_mask.shape)}")
+            valid_token_mask = valid_token_mask.to(device=x.device, dtype=torch.float32)
+        valid_token_count = valid_token_mask.sum().clamp_min(1.0)
         
         # 1. Project and normalize subqueries
         z = self.q_norm(self.q_proj(x))  # [B, L, 2048]
@@ -111,18 +122,18 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         # Update PID biases in training mode without backpropagating auxiliary loss gradients
         if self.training:
             with torch.no_grad():
-                total_tokens = max(B * L, 1)
+                total_tokens = valid_token_count
                 # Compute empirical selection frequencies: f_u = count / total_tokens
                 # One-hot aggregation over Top-k
                 f1 = torch.zeros(self.num_groups, self.codebook_size, device=x.device)
                 f2 = torch.zeros(self.num_groups, self.codebook_size, device=x.device)
                 
-                ones1 = torch.ones_like(top1_idx, dtype=torch.float32)
+                ones1 = valid_token_mask[:, :, None, None].expand_as(top1_idx).to(torch.float32)
                 f1.scatter_add_(1, top1_idx.view(-1, self.num_groups, self.topk_1).permute(1, 0, 2).reshape(self.num_groups, -1),
                                 ones1.view(-1, self.num_groups, self.topk_1).permute(1, 0, 2).reshape(self.num_groups, -1))
                 f1 = f1 / total_tokens
                 
-                ones2 = torch.ones_like(top2_idx, dtype=torch.float32)
+                ones2 = valid_token_mask[:, :, None, None].expand_as(top2_idx).to(torch.float32)
                 f2.scatter_add_(1, top2_idx.view(-1, self.num_groups, self.topk_2).permute(1, 0, 2).reshape(self.num_groups, -1),
                                 ones2.view(-1, self.num_groups, self.topk_2).permute(1, 0, 2).reshape(self.num_groups, -1))
                 f2 = f2 / total_tokens
@@ -201,11 +212,15 @@ class SpeculativeLatentHopfieldCore(nn.Module):
         c2_active = C2_norm[torch.arange(self.num_groups, device=x.device).view(1, 1, self.num_groups, 1), top2_idx]
         c2_bar = (weights_c2 * c2_active).sum(dim=-2)
         
+        def masked_group_mean(values: torch.Tensor) -> torch.Tensor:
+            weights = valid_token_mask[:, :, None]
+            return (values * weights).sum() / (valid_token_count * self.num_groups)
+
         commit_loss = (
-            F.mse_loss(q1, c1_bar.detach(), reduction='none').sum(dim=-1).mean() +
-            0.25 * F.mse_loss(q1.detach(), c1_bar, reduction='none').sum(dim=-1).mean() +
-            F.mse_loss(q2, c2_bar.detach(), reduction='none').sum(dim=-1).mean() +
-            0.25 * F.mse_loss(q2.detach(), c2_bar, reduction='none').sum(dim=-1).mean()
+            masked_group_mean(F.mse_loss(q1, c1_bar.detach(), reduction='none').sum(dim=-1)) +
+            0.25 * masked_group_mean(F.mse_loss(q1.detach(), c1_bar, reduction='none').sum(dim=-1)) +
+            masked_group_mean(F.mse_loss(q2, c2_bar.detach(), reduction='none').sum(dim=-1)) +
+            0.25 * masked_group_mean(F.mse_loss(q2.detach(), c2_bar, reduction='none').sum(dim=-1))
         )
                       
         return y_know, commit_loss

@@ -12,6 +12,7 @@ Verifies:
 import json
 import math
 import os
+import signal
 import shutil
 import tempfile
 import zlib
@@ -28,6 +29,7 @@ from run_pilot_experiment import (
     source_indices,
     parse_args,
 )
+import run_pilot_experiment as pilot_runner
 
 def test_gru_proxy_lm():
     print("[1] Testing GRUProxyLM model architecture and forward pass...")
@@ -82,22 +84,23 @@ def test_end_to_end_pilot_runner():
     try:
         shard_dir = os.path.join(tmp_dir, "shards")
         output_dir = os.path.join(tmp_dir, "runs")
-        os.makedirs(shard_dir, exist_ok=True)
+        recipe_id = "recipe_test"
+        recipe_shard_dir = os.path.join(shard_dir, recipe_id)
+        os.makedirs(recipe_shard_dir, exist_ok=True)
         os.makedirs(output_dir, exist_ok=True)
 
         seq_len = 128
         total_train_tokens = 512
-        recipe_id = "recipe_test"
 
         # 1. Create a synthetic train shard (4 sequences of 128 tokens = 512 tokens)
-        train_writer = BinaryShardWriter(os.path.join(shard_dir, f"{recipe_id}_train"), sequence_length=seq_len)
+        train_writer = BinaryShardWriter(os.path.join(recipe_shard_dir, f"{recipe_id}_train"), sequence_length=seq_len)
         for seq_i in range(4):
             tokens = list(range(seq_i * 10, seq_i * 10 + seq_len))
             train_writer.add_sequence(tokens, source_id="ubertext_2.0", split="train")
         train_writer.close()
 
         # 2. Create a synthetic val shard with 2 domains: ubertext_2.0 and laws_ua (fineweb_edu and starcoder2 absent)
-        val_writer = BinaryShardWriter(os.path.join(shard_dir, f"{recipe_id}_val"), sequence_length=seq_len)
+        val_writer = BinaryShardWriter(os.path.join(recipe_shard_dir, f"{recipe_id}_val"), sequence_length=seq_len)
         val_writer.add_sequence(list(range(seq_len)), source_id="ubertext_2.0", split="val")
         val_writer.add_sequence(list(range(seq_len)), source_id="laws_ua", split="val")
         val_writer.close()
@@ -141,10 +144,35 @@ def test_end_to_end_pilot_runner():
             chunk_tokens=32,
             workers=0,
             eval_every=2,
-            max_steps=4
+            checkpoint_every=2,
+            no_eval=False,
+            max_steps=2,
+            resume=False,
         )
 
-        # 5. Run recipe!
+        # 5. Interrupt after a completed step; the runner must checkpoint and resume.
+        append_jsonl = pilot_runner.append_jsonl
+
+        def append_and_interrupt(path, record):
+            append_jsonl(path, record)
+            if record["step"] == 1:
+                signal.raise_signal(signal.SIGINT)
+
+        pilot_runner.append_jsonl = append_and_interrupt
+        try:
+            run_recipe(test_args, test_config, recipe_id)
+            raise AssertionError("The synthetic SIGINT should stop the run")
+        except SystemExit as exc:
+            assert exc.code == 130
+        finally:
+            pilot_runner.append_jsonl = append_jsonl
+        assert os.path.exists(os.path.join(output_dir, f"{recipe_id}_checkpoints", "step_000001.pt"))
+
+        with open(os.path.join(output_dir, f"{recipe_id}_metrics.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"recipe": recipe_id, "step": 99, "interrupted_write": True}) + "\n")
+
+        test_args.max_steps = 4
+        test_args.resume = True
         run_recipe(test_args, test_config, recipe_id)
 
         # 6. Verify outputs
@@ -154,7 +182,7 @@ def test_end_to_end_pilot_runner():
         with open(log_path, "r", encoding="utf-8") as f:
             lines = [json.loads(line) for line in f]
 
-        assert len(lines) == 4, f"Expected 4 log lines, got {len(lines)}"
+        assert len(lines) == 4, f"Expected 4 log lines after resume, got {len(lines)}"
         print(f"    Recorded {len(lines)} training step metrics.")
 
         # Check step 2 and step 4 evaluation records
@@ -182,7 +210,23 @@ def test_end_to_end_pilot_runner():
         assert ckpt["step"] == 4
         assert ckpt["train_tokens_seen"] == total_train_tokens
         assert "model" in ckpt
+        assert "sampler" in ckpt and "run_signature" in ckpt
         print("    Checkpoint file verified: weights, step, and token counts preserved.")
+
+        # Existing runs must never be silently restarted or resumed with a changed model shape.
+        test_args.resume = False
+        try:
+            run_recipe(test_args, test_config, recipe_id)
+            raise AssertionError("Existing run artifacts must reject an implicit restart")
+        except FileExistsError:
+            pass
+        test_args.resume = True
+        test_args.hidden_size += 1
+        try:
+            run_recipe(test_args, test_config, recipe_id)
+            raise AssertionError("Resume must reject a changed model configuration")
+        except RuntimeError as exc:
+            assert "compatible" in str(exc)
 
         print("    [PASS] End-to-end pilot runner execution verified.")
     finally:

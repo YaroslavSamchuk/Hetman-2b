@@ -265,7 +265,7 @@ class HetmanPreTrainedModel(PreTrainedModel):
 
 class HetmanModel(HetmanPreTrainedModel):
     def __init__(self, config: HetmanConfig):
-        super().__init__()
+        super().__init__(config)
         self.config = config
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         
@@ -315,10 +315,25 @@ class HetmanModel(HetmanPreTrainedModel):
         offset: int = 0,
         attention_mask: Optional[torch.Tensor] = None,
         state_reset_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None
+        position_ids: Optional[torch.Tensor] = None,
+        token_loss_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, List[Any]]]:
         B, L = input_ids.shape
+        if offset < 0 or offset + L > self.config.max_position_embeddings:
+            raise ValueError(
+                f"Requested positions [{offset}, {offset + L}) exceed configured context "
+                f"{self.config.max_position_embeddings}"
+            )
         x = self.embed_tokens(input_ids)
+
+        if token_loss_mask is None:
+            if attention_mask is not None and attention_mask.dim() == 2:
+                token_loss_mask = attention_mask
+            else:
+                token_loss_mask = torch.ones((B, L), device=input_ids.device, dtype=torch.bool)
+        if token_loss_mask.shape != (B, L):
+            raise ValueError(f"token_loss_mask must have shape {(B, L)}, got {tuple(token_loss_mask.shape)}")
+        token_loss_mask = token_loss_mask.to(device=input_ids.device, dtype=torch.bool)
 
         if attention_mask is not None:
             if attention_mask.dim() == 2:
@@ -344,7 +359,7 @@ class HetmanModel(HetmanPreTrainedModel):
         
         # 2. Stage 2: Triad Processing
         # Branch A: Hopfield Core fact retrieval (Aux-loss-free PID routing)
-        y_know, hopfield_loss = self.hopfield_core(x_stem)
+        y_know, hopfield_loss = self.hopfield_core(x_stem, valid_token_mask=token_loss_mask)
         
         # Branch B: Continuous Domain Representation (8 SwiGLU layers)
         y_domain = x_stem
@@ -375,7 +390,9 @@ class HetmanModel(HetmanPreTrainedModel):
         x_fused = self.fusion_norm(x_stem + self.fusion_proj(y_triad))
 
         # Disentanglement / Orthogonality loss term:
-        ortho_loss = (F.cosine_similarity(y_know, y_domain + y_hypo, dim=-1) ** 2).mean()
+        ortho_values = F.cosine_similarity(y_know, y_domain + y_hypo, dim=-1) ** 2
+        ortho_weights = token_loss_mask.to(ortho_values.dtype)
+        ortho_loss = (ortho_values * ortho_weights).sum() / ortho_weights.sum().clamp_min(1.0)
         
         # 3. Stage 3: Logic Arbiter (16 layers: 12 DeltaNet + 4 Global Attention)
         x_arb = x_fused
@@ -401,7 +418,7 @@ class HetmanModel(HetmanPreTrainedModel):
 
 class HetmanForCausalLM(HetmanPreTrainedModel):
     def __init__(self, config: HetmanConfig):
-        super().__init__()
+        super().__init__(config)
         self.config = config
         self.logit_softcap = getattr(config, "logit_softcap", 30.0)
         self.model = HetmanModel(config)
@@ -421,7 +438,8 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
         offset: int = 0,
         attention_mask: Optional[torch.Tensor] = None,
         state_reset_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None
+        position_ids: Optional[torch.Tensor] = None,
+        token_loss_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         hidden_states, hopfield_loss, ortho_loss, new_states = self.model(
             input_ids,
@@ -429,7 +447,8 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
             offset=offset,
             attention_mask=attention_mask,
             state_reset_mask=state_reset_mask,
-            position_ids=position_ids
+            position_ids=position_ids,
+            token_loss_mask=token_loss_mask,
         )
         logits = self.lm_head(hidden_states)
         
@@ -442,26 +461,38 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
         mtp_loss = None
         
         if labels is not None:
+            if labels.dim() != 2 or labels.shape[0] != input_ids.shape[0]:
+                raise ValueError("labels must be a 2D tensor with the same batch size as input_ids")
+            if labels.shape[1] < input_ids.shape[1] or labels.shape[1] > input_ids.shape[1] + 2:
+                raise ValueError("labels length must match input_ids or include at most two lookahead targets")
             # 1. Primary Next-Token Prediction (t + 1)
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
+            primary_count = min(input_ids.shape[1], labels.shape[1] - 1)
+            shift_logits = logits[..., :primary_count, :].contiguous()
+            shift_labels = labels[..., 1:1 + primary_count].contiguous()
             valid_mask = (shift_labels != -100)
             if valid_mask.any():
-                ce_loss = F.cross_entropy(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
+                ce_loss = F.cross_entropy(
+                    shift_logits.reshape(-1, self.config.vocab_size), shift_labels.reshape(-1), ignore_index=-100
+                )
             else:
                 ce_loss = torch.tensor(0.0, device=input_ids.device, requires_grad=True)
             
             # 2. Multi-Token Prediction (t + 2)
-            if input_ids.shape[1] > 2:
+            if labels.shape[1] > 2:
                 h_mtp = self.mtp_head(hidden_states)
                 logits_mtp = self.lm_head(h_mtp)
                 if self.logit_softcap > 0.0:
                     logits_mtp = self.logit_softcap * torch.tanh(logits_mtp / self.logit_softcap)
-                shift_logits_mtp = logits_mtp[..., :-2, :].contiguous()
-                shift_labels_mtp = labels[..., 2:].contiguous()
+                mtp_count = min(input_ids.shape[1], labels.shape[1] - 2)
+                shift_logits_mtp = logits_mtp[..., :mtp_count, :].contiguous()
+                shift_labels_mtp = labels[..., 2:2 + mtp_count].contiguous()
                 valid_mask_mtp = (shift_labels_mtp != -100)
                 if valid_mask_mtp.any():
-                    mtp_loss = F.cross_entropy(shift_logits_mtp.view(-1, self.config.vocab_size), shift_labels_mtp.view(-1))
+                    mtp_loss = F.cross_entropy(
+                        shift_logits_mtp.reshape(-1, self.config.vocab_size),
+                        shift_labels_mtp.reshape(-1),
+                        ignore_index=-100,
+                    )
                 else:
                     mtp_loss = torch.tensor(0.0, device=input_ids.device)
             else:
@@ -495,9 +526,16 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
         **kwargs
     ) -> torch.Tensor:
         """
-        Autoregressive generation with KV-cache / recurrent state preservation.
-        Fully compatible with Hugging Face generate() callers and standard sampling pipelines.
+        Experimental autoregressive generation with recurrent/KV state preservation.
         """
+        if max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be non-negative")
+        if not math.isfinite(temperature) or temperature < 0.0:
+            raise ValueError("temperature must be finite and non-negative")
+        if not math.isfinite(top_p) or not 0.0 < top_p <= 1.0:
+            raise ValueError("top_p must be finite and in (0, 1]")
+        if kwargs:
+            raise ValueError(f"Unsupported generation options: {', '.join(sorted(kwargs))}")
         device = next(self.parameters()).device
         if input_ids is None or input_ids.numel() == 0:
             input_ids = torch.tensor([[1]], dtype=torch.long, device=device)  # <s> BOS token
@@ -505,9 +543,19 @@ class HetmanForCausalLM(HetmanPreTrainedModel):
             input_ids = input_ids.unsqueeze(0)
             
         B, seq_len = input_ids.shape
+        if attention_mask is not None:
+            if attention_mask.shape != input_ids.shape:
+                raise ValueError("attention_mask must have the same shape as input_ids")
+            if not bool(attention_mask.bool().all()):
+                raise ValueError("Batched generation with padded prompts is not supported")
         if seq_len == 0:
             input_ids = torch.tensor([[1]], dtype=torch.long, device=device).expand(B, 1)
             seq_len = 1
+        if seq_len + max_new_tokens > self.config.max_position_embeddings:
+            raise ValueError(
+                f"Prompt plus requested generation ({seq_len + max_new_tokens}) exceeds configured context "
+                f"{self.config.max_position_embeddings}"
+            )
             
         current_ids = input_ids.clone()
         past_states = None

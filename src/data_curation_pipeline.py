@@ -456,7 +456,8 @@ class DecontaminationAuditor:
     Logs the exact matched span and benchmark ID for scientific transparency.
     """
     def __init__(self, benchmark_entries: Optional[List[Dict[str, str]]] = None):
-        self.gram_index: Dict[int, Tuple[str, str]] = {} # crc32 -> (benchmark_name, matched_text)
+        self.gram_index: Dict[str, Tuple[str, str]] = {} # normalized 13-gram -> (benchmark_name, matched_text)
+        self.indexed_cases = 0
         if benchmark_entries:
             for entry in benchmark_entries:
                 self.index_test_case(entry.get("benchmark", "eval"), entry.get("prompt", ""))
@@ -467,22 +468,28 @@ class DecontaminationAuditor:
 
     def index_test_case(self, benchmark_name: str, prompt: str):
         words = self._tokenize(prompt)
+        if not benchmark_name.strip() or len(words) < 13:
+            raise ValueError("Benchmark decontamination entries require a name and at least 13 words")
+        self.indexed_cases += 1
         for i in range(len(words) - 12):
             span = " ".join(words[i:i+13])
-            h = zlib.crc32(span.encode("utf-8"))
-            self.gram_index[h] = (benchmark_name, span)
+            self.gram_index[span] = (benchmark_name, span)
 
     def check_contamination(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
         """Returns (is_contaminated, benchmark_name, matched_span)."""
+        if not self.gram_index:
+            raise RuntimeError(
+                "Benchmark decontamination index is empty. Supply and load the approved evaluation prompts; "
+                "refusing to claim a decontaminated dataset."
+            )
         words = self._tokenize(text)
         if len(words) < 13:
             return False, None, None
             
         for i in range(len(words) - 12):
             span = " ".join(words[i:i+13])
-            h = zlib.crc32(span.encode("utf-8"))
-            if h in self.gram_index:
-                bench, original_span = self.gram_index[h]
+            if span in self.gram_index:
+                bench, original_span = self.gram_index[span]
                 return True, bench, original_span
         return False, None, None
 
@@ -492,12 +499,16 @@ class DecontaminationAuditor:
 # ==============================================================================
 
 class DataCurationPipeline:
-    def __init__(self, manifest_path: str = "curation_manifest.jsonl"):
+    def __init__(
+        self,
+        manifest_path: str = "curation_manifest.jsonl",
+        benchmark_entries: Optional[List[Dict[str, str]]] = None,
+    ):
         self.manifest_path = manifest_path
         self.normalizer = ContextAwareNormalizer()
         self.filters = DomainQualityFilters()
         self.dedup = DomainCalibratedDeduplicator(num_perm=128)
-        self.decontam = DecontaminationAuditor()
+        self.decontam = DecontaminationAuditor(benchmark_entries)
         self.tracker = StageStatisticsTracker()
 
     def process_document(self, raw_doc: Dict[str, Any]) -> DocumentMetadata:

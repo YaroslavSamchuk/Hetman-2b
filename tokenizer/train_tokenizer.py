@@ -197,33 +197,9 @@ def bootstrap_base_tokenizer(output_dir: str = "tokenizer") -> Tokenizer:
     return tokenizer
 
 if __name__ == "__main__":
-    print("=== Training / Bootstrapping Hetman-2.0B Tokenizer ===")
-    tok = bootstrap_base_tokenizer("tokenizer")
-    
-    # Verify special tokens IDs
-    for expected_id, token_str in enumerate(SPECIAL_TOKENS[:12]):
-        actual_id = tok.token_to_id(token_str)
-        print(f"Token '{token_str}': Expected ID = {expected_id}, Actual ID = {actual_id}")
-        assert actual_id == expected_id, f"ID mismatch for {token_str}: {actual_id} != {expected_id}"
-        
-    # Verify all 33 Ukrainian letters (both uppercase and lowercase) are atomic 1-token characters
-    ua_alphabet = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯабвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
-    for ch in ua_alphabet:
-        enc = tok.encode(ch)
-        assert len(enc.ids) == 1, f"Letter '{ch}' decomposed into {len(enc.ids)} tokens: {enc.tokens}!"
-    print(f"      ✓ All 33 Ukrainian letters (upper & lower) verified as atomic 1-token characters!")
-
-    # Verify Ukrainian apostrophes (', ’, ʼ) are atomic 1-token characters
-    for apos in ["'", "’", "ʼ"]:
-        enc = tok.encode(apos)
-        assert len(enc.ids) == 1, f"Apostrophe '{apos}' decomposed into {len(enc.ids)} tokens: {enc.tokens}!"
-    print(f"      ✓ All Ukrainian apostrophes (', ’, ʼ) verified as atomic 1-token characters!")
-
-    # Verify ChatML formatting roundtrip
-    test_phrase = "<|im_start|>user\nПривіт, Гетьмане!<|im_end|>\n<|im_start|>assistant\n<think>\nПеревіряю стан.\n</think>\nЯ готовий до роботи!<|im_end|>"
-    encoded = tok.encode(test_phrase)
-    decoded = tok.decode(encoded.ids, skip_special_tokens=False)
-    print(f"\n[✓] ChatML Roundtrip Test Passed!")
-    print(f"Encoded tokens count: {len(encoded.ids)}")
-    print("=== Tokenizer Bootstrap Complete! ===")
+    raise SystemExit(
+        "Direct tokenizer bootstrap is disabled because its former sample-corpus path "
+        "could overwrite the checked-in tokenizer. Use src/train_pilot_tokenizer.py "
+        "after reviewing and placing the approved raw corpora."
+    )
 

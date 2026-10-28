@@ -579,7 +579,7 @@ def run_all_verifications():
     elapsed = time.time() - start_time
     print("\n" + "=" * 78)
     print(f"  ALL 8 VERIFICATION BLOCKS PASSED IN {elapsed:.2f} SECONDS!")
-    print("  The Hetman-2.0B architecture is mathematically sound and ready for training!")
+    print("  Local synthetic architecture checks passed; production training readiness was not tested.")
     print("=" * 78)
 
 if __name__ == "__main__":

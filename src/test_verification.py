@@ -117,7 +117,7 @@ def run_tests():
 
     print("\n" + "=" * 70)
     print("  ALL 6 NUMERICAL SANITY TESTS PASSED! (0 NaNs, 0 Errors)")
-    print("  Hetman-2.0B architecture verified and ready for TPU v5e-128 pre-training!")
+    print("  Local numerical checks passed; TPU training readiness was not tested.")
     print("=" * 70)
 
 if __name__ == "__main__":
