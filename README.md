@@ -13,6 +13,40 @@ Hetman is an experimental language-model research project. The repository contai
 
 Context length, throughput, memory use, factuality, and safety are unverified. No benchmark result or absence of hallucinations is claimed.
 
+## Architecture and research hypotheses
+
+Hetman explores whether a small language model can benefit from combining recurrent sequence processing, periodic global attention, and an explicit associative-memory branch. This is a **design hypothesis**, not a demonstrated quality or efficiency improvement.
+
+```mermaid
+flowchart TD
+    A[Token embeddings] --> B[Stem: 8 layers<br/>7 DeltaNet + 1 global attention]
+    B --> C1[Associative-memory branch<br/>dual codebooks + top-k lookup]
+    B --> C2[Domain branch<br/>8 residual SwiGLU blocks]
+    B --> C3[Hypothesis branch<br/>6 layers: 5 DeltaNet + 1 global attention]
+    C1 --> D[Token-wise router and fusion]
+    C2 --> D
+    C3 --> D
+    B --> E[Arbiter: 16 layers<br/>12 DeltaNet + 4 global attention]
+    D --> E
+    B --> F[Residual exit]
+    D --> F
+    E --> F
+    F --> G[4 DeltaNet exit layers]
+    G --> H[Tied embedding / language-model head]
+    G --> I[Auxiliary t+2 prediction head]
+```
+
+| Component | What the prototype does | What remains unproven |
+| --- | --- | --- |
+| **Hybrid sequence stack** | Configures 28 recurrent Gated DeltaNet layers and 6 global-attention layers. Global attention uses 12 query heads and 2 key/value heads. | Long-context memory use, throughput, and quality have not been measured. The configured 262,144-token context is not validated end to end. |
+| **Three-branch processing** | From the stem representation, computes associative-memory, feed-forward, and hypothesis-processing branches. A token-wise softmax router weights them before fusion. | The branch roles and router have not been shown to improve factual recall, reasoning, or generalization. |
+| **Associative-memory lookup** | Uses 16 groups and two codebooks per group, selecting top-8 and top-4 code entries. A commitment term and non-gradient routing-bias updates are included in the prototype. | The large value tensor is stored as dense floating-point parameters. Sparse lookup does not currently mean sparse or compressed storage; retrieval quality and routing stability need real training. |
+| **Ternary/FWHT experiment** | Selected linear layers apply fake ternary weight quantization with a straight-through estimator; some inputs use a 512-wide blockwise Walsh–Hadamard transform. | Parameters remain dense floating-point tensors and operations use ordinary PyTorch linear algebra. There are no packed low-bit kernels or measured speed, memory, or accuracy gains. |
+| **Multi-token prediction** | Adds an auxiliary head trained against the token at offset t+2. | It is an auxiliary training objective only; speculative decoding and faster generation are not implemented in the runtime. |
+| **Data safeguards** | The pilot pipeline records source provenance, checks shard integrity, separates validation data, and blocks corpus creation until license review and held-out evaluation prompts are supplied. | Corpus rights have not yet been approved, the expected corpora/prompts are not present, and the current pilot's A/B/C comparison uses a GRU proxy rather than Hetman. |
+
+The current configured model shape has about 2.16 billion parameters including the auxiliary head, based on a meta-device parameter count. This is a count of tensor elements—not a trained checkpoint, measured compute requirement, inference footprint, or evidence that the model fits a particular accelerator.
+
 ## Repository layout
 
 | Path | Purpose |
